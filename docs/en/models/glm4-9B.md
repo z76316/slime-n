@@ -44,7 +44,7 @@ Execute the training:
 
 ```bash
 cd /root/slime
-bash script/run-glm4-9B.sh
+bash scripts/run-glm4-9B.sh
 ```
 
 ### Parameter Introduction
