@@ -1,4 +1,6 @@
 from time import time
+from functools import wraps
+from contextlib import contextmanager
 
 
 __all__ = ["Timer", "timer"]
@@ -40,20 +42,13 @@ class Timer:
     def log_dict(self):
         return self.timers
 
-
-class TimerContext:
-    def __init__(self, name):
-        self.name = name
-        self.timer_instance = Timer()
-
-    def __enter__(self):
-        self.start_time = time()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.end_time = time()
-        self.timer_instance.add(self.name, self.end_time - self.start_time)
-        return False  # Don't suppress exceptions
+    @contextmanager
+    def context(self, name):
+        self.start(name)
+        try:
+            yield
+        finally:
+            self.end(name)
 
 
 def timer(name_or_func):
@@ -72,17 +67,12 @@ def timer(name_or_func):
     # When used as a context manager
     if isinstance(name_or_func, str):
         name = name_or_func
-        return TimerContext(name)
+        return Timer().context(name)
 
     func = name_or_func
-    name = func.__name__
-
+    @wraps(func)
     def wrapper(*args, **kwargs):
-        timer_instance = Timer()
-        start_time = time()
-        result = func(*args, **kwargs)
-        end_time = time()
-        timer_instance.add(name, end_time - start_time)
-        return result
+        with Timer().context(func.__name__):
+            return func(*args, **kwargs)
 
     return wrapper
