@@ -150,9 +150,13 @@ class HttpServerEngineAdapter(EngineBase):
             return
         # flush cache will not return status_code 200 when there are pending requests
         while True:
-            response = requests.get(f"http://{self.server_args.host}:{self.server_args.port}/flush_cache")
-            if response.status_code == 200:
-                break
+            try:
+                response = requests.get(f"http://{self.server_args.host}:{self.server_args.port}/flush_cache")
+                if response.status_code == 200:
+                    break
+            except Exception as e:
+                print(f"Error flushing cache: {e}")
+                continue
 
     def shutdown(self):
         requests.post(

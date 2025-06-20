@@ -56,27 +56,28 @@ def _create_placement_group(num_gpus):
 def create_placement_groups(args):
     """Create placement groups for actor and rollout engines."""
 
-    if not args.debug_rollout_only:
-        print("Create Actor Placement:")
-        actor_pg = _create_placement_group(args.actor_num_nodes * args.actor_num_gpus_per_node)
-
-    if args.colocate:
-        rollout_pg = actor_pg
-    elif args.debug_train_only:
-        rollout_pg = None
+    num_gpus = 0
+    if args.debug_train_only:
+        num_gpus = args.actor_num_nodes * args.actor_num_gpus_per_node
+        rollout_offset = 0
+    elif args.debug_rollout_only:
+        num_gpus = args.rollout_num_gpus
+        rollout_offset = 0
+    elif args.colocate:
+        num_gpus = args.actor_num_nodes * args.actor_num_gpus_per_node
+        rollout_offset = 0
     else:
-        print("Create Rollout Placement:")
-        rollout_pg = _create_placement_group(args.rollout_num_gpus)
+        num_gpus = args.actor_num_nodes * args.actor_num_gpus_per_node + args.rollout_num_gpus
+        rollout_offset = args.actor_num_nodes * args.actor_num_gpus_per_node
 
-    # This is hacky, we hope that when doing rollout_only, we can still instantiate the actor model.
-    # And we hope that the rollout could donimate the resource allocation.
-    if args.debug_rollout_only:
-        assert rollout_pg is not None, "Rollout placement group must be created in debug rollout only mode."
-        actor_pg = rollout_pg
+    print(f"Creating placement group with {num_gpus} GPUs...")
+    pg, actor_pg_reordered_bundle_indices = _create_placement_group(num_gpus)
+
+    rollout_pg_reordered_bundle_indices = actor_pg_reordered_bundle_indices[rollout_offset:]
 
     return {
-        "actor": actor_pg,
-        "rollout": rollout_pg,
+        "actor": (pg, actor_pg_reordered_bundle_indices),
+        "rollout": (pg, rollout_pg_reordered_bundle_indices),
     }
 
 

@@ -393,6 +393,8 @@ class TrainRayActor(RayActor):
         if converted_named_tensors:
             self._update_param_from_distributed(converted_named_tensors)
 
+        dist.barrier()
+
         buffer_size = 0
         for name, param in update_weight_utils.named_parameters(self.args, self.model):
             if ".experts." not in name:
@@ -413,6 +415,7 @@ class TrainRayActor(RayActor):
         if converted_named_tensors:
             self._update_param_from_distributed(converted_named_tensors)
 
+        dist.barrier()
         if dist.get_rank() == 0:
             ray.get([engine.continue_generation.remote() for engine in self.rollout_engines])
         dist.barrier()
@@ -500,7 +503,9 @@ class TrainRayActor(RayActor):
                 param = update_weight_utils.all_gather_param(info.name, param)
                 param = update_weight_utils.remove_padding(info.name, param, self.vocab_size)
                 converted_named_tensors.extend(
-                    update_weight_utils.convert_to_hf(self.args, self.model_name, info.name, param, self.quantization_config)
+                    update_weight_utils.convert_to_hf(
+                        self.args, self.model_name, info.name, param, self.quantization_config
+                    )
                 )
             self._update_converted_params_from_cuda_ipc(converted_named_tensors)
 
