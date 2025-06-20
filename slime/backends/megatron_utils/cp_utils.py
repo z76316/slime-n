@@ -57,7 +57,7 @@ def get_sum_of_sample_mean(
             if loss_masks is not None:
                 res = sum(
                     [
-                        (x_i * loss_mask_i).sum() / loss_mask_i.sum()
+                        (x_i * loss_mask_i).sum() / torch.max(loss_mask_i.sum(), 1)
                         for x_i, loss_mask_i in zip(x.split(response_lengths, dim=0), loss_masks)
                     ]
                 )
@@ -97,7 +97,7 @@ def get_sum_of_sample_mean(
             if loss_masks is not None:
                 x = sum(
                     [
-                        (x_i * chunked_loss_mask).sum() / loss_mask.sum()
+                        (x_i * chunked_loss_mask).sum() / torch.max(loss_mask.sum(), 1)
                         for x_i, chunked_loss_mask, loss_mask in zip(
                             x.split(cp_chunk_lengths, dim=0), chunked_loss_masks, loss_masks
                         )
