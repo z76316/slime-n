@@ -381,12 +381,14 @@ class TrainRayActor(RayActor):
             param = update_weight_utils.remove_padding(name, param, self.vocab_size)
             if not self._is_pp_src_rank:
                 continue
-            if buffer_size + param.numel() * param.element_size() > self.args.update_weight_buffer_size:
+            param_size = param.numel() * param.element_size()
+            if buffer_size + param_size > self.args.update_weight_buffer_size:
                 self._update_param_from_distributed(converted_named_tensors)
                 buffer_size = 0
             converted_named_tensors += update_weight_utils.convert_to_hf(
                 self.args, self.model_name, name, param, self.quantization_config
             )
+            buffer_size += param_size
 
         if converted_named_tensors:
             self._update_param_from_distributed(converted_named_tensors)
@@ -399,12 +401,14 @@ class TrainRayActor(RayActor):
             param = update_weight_utils.remove_padding(name, param, self.vocab_size)
             if not self._is_ep_src_rank:
                 continue
-            if buffer_size + param.numel() * param.element_size() > self.args.update_weight_buffer_size:
+            param_size = param.numel() * param.element_size()
+            if buffer_size + param_size > self.args.update_weight_buffer_size:
                 self._update_param_from_distributed(converted_named_tensors)
                 buffer_size = 0
             converted_named_tensors += update_weight_utils.convert_to_hf(
                 self.args, self.model_name, name, param, self.quantization_config
             )
+            buffer_size += param_size
 
         if converted_named_tensors:
             self._update_param_from_distributed(converted_named_tensors)
