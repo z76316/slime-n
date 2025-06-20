@@ -149,20 +149,6 @@ sglang 的加载非常简单，只需要：
 
 ### 数据格式
 
-sglang 的加载非常简单，只需要：
-
-- `--hf-checkpoint`：初始化 sglang 用的 huggingface ckpt；
-
-注意：
-
-- 在第一个训练步之前，slime 会把 megatron 里的参数同步给 sglang，所以 `--hf-checkpoint` 中不需要有最新的训练参数，在续训得时候也不需要更换 hf ckpt；
-- sglang 默认会从 huggingface ckpt 中 `config.json` 读取模型的最大 context length，可以使用 `--sglang-context-length` 参数来对这个值进行覆盖，从而支持进行更长的推理；
-- 在训推一体的训练过程中，虽然 megatron 和 sglang 会先后 offload，但是还是需要为对方留有一些空间，需要通过减小 `--sglang-mem-fraction-static` 来调整 sglang 的显存占用总量。
-
-对于一些 sglang 的自定义以及 slime 引入 sglang 的原理，请见 sglang 使用方法一节。
-
-### 数据格式
-
 目前 slime 只支持加载 `.jsonl` 格式文件，即文件的每一行都是一个 json，一行数据的样例（展开后）为：
 
 ```json
