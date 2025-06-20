@@ -7,6 +7,7 @@ from typing import Dict
 import ray
 import torch
 import torch.distributed as dist
+from cumem_allocator import CuMemAllocator
 
 # somehow we need to import this, otherwise the update weight will stuck
 from megatron.core import mpu
@@ -15,13 +16,6 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from sglang.srt.patch_torch import monkey_patch_torch_reductions
 from sglang.srt.utils import MultiprocessingSerializer
 from transformers import AutoConfig, AutoTokenizer
-
-try:
-    # somehow removing this dependency with vllm will result in error with
-    # update_weight_from_distributed in sglang...
-    from vllm.device_allocator.cumem import CuMemAllocator
-except:
-    from cumem_allocator import CuMemAllocator
 
 from slime.backends import megatron_utils
 from slime.backends.megatron_utils import update_weight_utils

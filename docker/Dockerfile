@@ -45,11 +45,8 @@ RUN git clone https://github.com/flashinfer-ai/flashinfer.git --recursive flashi
     cd flashinfer-main && \
     TORCH_CUDA_ARCH_LIST="9.0;9.0a" FLASHINFER_ENABLE_AOT=1 pip install --no-build-isolation -v -e .
 
-RUN pip install ray[default] pylatexenc blobfile accelerate "mcp[cli]" openai
-
-# vllm
-RUN pip install msgspec watchfiles blake3 depyf lark lm-format-enforcer "mistral_common[opencv]>=1.5.4" "opencv-python-headless>=4.11.0" gguf py-cpuinfo
-RUN pip install vllm --no-deps
+RUN pip install ray[default] pylatexenc blobfile accelerate "mcp[cli]" openai msgspec
+RUN pip install git+https://github.com/zhuzilin/cumem_allocator.git
 
 # buffer
 RUN pip install multiprocess timeout_decorator nvitop --no-deps
