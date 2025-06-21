@@ -43,7 +43,7 @@ Execute the training script:
 
 ```bash
 cd /root/slime
-bash script/run-qwen3-4B.sh
+bash scripts/run-qwen3-4B.sh
 ```
 
 ### Parameter Introduction
