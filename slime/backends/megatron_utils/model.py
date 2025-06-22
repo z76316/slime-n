@@ -94,6 +94,8 @@ def setup_model_and_optimizer(
         )
         opt_param_scheduler = get_optimizer_param_scheduler(args, optimizer)
         for optimizer in optimizer.chained_optimizers:
+            if not getattr(optimizer, "init_state_fn", None):
+                continue
             optimizer.init_state_fn(optimizer.optimizer, optimizer.config)
 
     else:

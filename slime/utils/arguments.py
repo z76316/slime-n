@@ -264,7 +264,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
             parser.add_argument(
                 "--update-weight-buffer-size",
                 type=int,
-                default=128 * 1024**2,
+                default=512 * 1024**2,
                 help=(
                     "buffer size for update weight, in bytes. "
                     "This is used for updating weights by chunk and should be useful for MoE models."

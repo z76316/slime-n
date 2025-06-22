@@ -54,6 +54,10 @@ We provide examples to use [GLM-4-9B](https://huggingface.co/THUDM/GLM-Z1-9B-041
 - [Example: GLM-4-9B Model](docs/en/models/glm4-9B.md).
 - [Example: Qwen3-4B Model](docs/en/models/qwen3-4B.md).
 
+For MoE example, please refer to:
+
+- [Example: Qwen3-30B-A3B Model](docs/en/models/qwen3-30B-A3B.md).
+
 ### Checkpoint Format Conversion
 
 Since slime uses Megatron, and Megatron does not support loading Hugging Face checkpoints directly, we need to convert the model to the `torch_dist` format that Megatron supports.
