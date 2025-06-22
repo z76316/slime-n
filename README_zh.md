@@ -54,6 +54,10 @@ pip install -e .
 - [示例：GLM-4-9B 模型](docs/zh/models/glm4-9B.md).
 - [示例：Qwen3-4B 模型](docs/zh/models/qwen3-4B.md).
 
+我们也提供了 MoE 模型的样例，请查看：
+
+- [示例：Qwen3-30B-A3B 模型](docs/zh/models/qwen3-30B-A3B.md).
+
 ### Checkpoint 格式转换
 
 由于 slime 使用 megatron，而 megatron 不支持加载 huggingface checkpoint，我们需要将模型转换至 megatron 可以支持的 torch_dist 格式。
