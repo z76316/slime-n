@@ -40,8 +40,9 @@ class TrainRayActor(RayActor):
         os.environ["WORLD_SIZE"] = str(self._world_size)
         os.environ["RANK"] = str(self._rank)
         # TODO: currently this doesn't work as ray has already set torch.cuda.device_count().
-        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
-        os.environ["LOCAL_RANK"] = str(ray.get_gpu_ids()[0])
+        # os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        # os.environ["LOCAL_RANK"] = str(ray.get_gpu_ids()[0])
+        os.environ["LOCAL_RANK"] = "0"
 
     def init(self, args, role, with_ref=False):
         self.args = args
