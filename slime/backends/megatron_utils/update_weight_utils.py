@@ -197,23 +197,32 @@ def get_param_info_buckets(args, model) -> list[list[ParamInfo]]:
     return param_info_buckets
 
 
-def quantize_param(name, param, weight_block_size):
+def quantize_param(name, weight, weight_block_size):
     assert name.endswith(".weight"), f"Expected weight parameter, got {name}"
+    FP8_MIN = torch.finfo(torch.float8_e4m3fn).min
+    FP8_MAX = torch.finfo(torch.float8_e4m3fn).max
     if weight_block_size is not None:
-        param_shape = param.shape
-        scale_shape = (
-            param_shape[0] // weight_block_size[0],
-            param_shape[1] // weight_block_size[1],
-        )
-        amax_inv = 1
-        scale = torch.full(scale_shape, amax_inv, dtype=param.dtype, device=param.device)
+        # per block quant
+        block_n, block_k = weight_block_size[0], weight_block_size[1]
+
+        n_tiles = weight.shape[0] // block_n
+        k_tiles = weight.shape[1] // block_k
+
+        qweight = weight.reshape(n_tiles, block_n, k_tiles, block_k)
+        block_max = torch.max(torch.abs(qweight), dim=1, keepdim=True)[0]
+        block_max = torch.max(block_max, dim=3, keepdim=True)[0]
+
+        scale = block_max.to(torch.float32) / FP8_MIN
+        qweight = (qweight / scale).clamp(min=FP8_MIN, max=FP8_MAX).reshape(weight.shape).to(torch.float8_e4m3fn)
+        scale = scale.squeeze()
         scale_name = name.replace(".weight", ".weight_scale_inv")
-        param = (param * amax_inv).to(torch.float8_e4m3fn)
     else:
-        scale = torch.tensor(1.0, dtype=param.dtype, device=param.device)
+        # per tensor quant
+        scale = weight.abs().max().clamp(min=1e-12).to(torch.float32) / FP8_MAX
+        qweight = (weight / scale).clamp(min=FP8_MIN, max=FP8_MAX).to(torch.float8_e4m3fn)
+        scale = scale.view(1)
         scale_name = name.replace(".weight", ".weight_scale")
-        param = (param / scale).to(torch.float8_e4m3fnuz)
-    return [(name, param), (scale_name, scale)]
+    return [(name, qweight), (scale_name, scale)]
 
 
 def quantize_params(args, megatron_name, converted_named_params, quantization_config):
@@ -364,7 +373,7 @@ def convert_glm4_to_hf(args, name, param):
             return [(f"model.layers.{layer_idx}.self_attn.q_norm.weight", param)]
         elif rest == "self_attention.k_layernorm.weight":
             return [(f"model.layers.{layer_idx}.self_attn.k_norm.weight", param)]
-        
+
         # sandwitch norm
         elif rest == "post_self_attn_layernorm.weight":
             return [(f"model.layers.{layer_idx}.post_self_attn_layernorm.weight", param)]
