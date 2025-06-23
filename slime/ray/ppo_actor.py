@@ -25,7 +25,16 @@ from slime.utils.memory_utils import clear_memory, print_memory
 from slime.utils.timer import Timer, timer
 
 
-@ray.remote(num_gpus=1)
+@ray.remote(
+    num_gpus=1,
+    runtime_env={
+        "env_vars": {
+            # because sglang will always set NCCL_CUMEM_ENABLE to 0
+            # we need also set it to 0 to prevent nccl error.
+            "NCCL_CUMEM_ENABLE": "0"
+        }
+    },
+)
 class TrainRayActor(RayActor):
     def __init__(self, world_size, rank, master_addr, master_port):
         self._world_size = world_size
