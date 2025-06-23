@@ -49,7 +49,8 @@ class Buffer:
         self.args = args
 
         self.buffer = []
-        self.buffer_filter = load_function(self.args.buffer_filter_path)
+        self.read_function = load_function(self.args.buffer_read_function_path)
+        self.write_function = load_function(self.args.buffer_write_function_path)
 
         self.train_data_pool = {}
         self.eval_data_pool = {}
@@ -123,19 +124,19 @@ class Buffer:
 
         wandb.init(**wandb_config, settings=wandb.Settings(mode="shared"))
 
-    async def get_samples(self, num_samples) -> list[Sample]:
+    async def get_samples(self, num_samples: int, rollout_info: dict[str, Any]) -> list[Sample]:
         """
         Return num_samples samples
         """
 
-        samples = await self._get_samples_from_buffer(num_samples)
+        samples = await self._get_samples_from_buffer(num_samples, rollout_info)
         num_samples -= len(samples)
-        if num_samples == 0:
-            return samples
         
         assert num_samples % self.args.n_samples_per_prompt == 0
         num_prompts = num_samples // self.args.n_samples_per_prompt
-
+        
+        if num_samples == 0:
+            return samples
 
         if self.dataset is not None:
             if self.sample_offset + num_prompts <= len(self.dataset):
@@ -164,64 +165,23 @@ class Buffer:
                 samples.append(sample)
         return samples
 
-    async def _get_samples_from_buffer(self, num_samples) -> list[Sample]:
+    async def _get_samples_from_buffer(self, num_samples: int, rollout_info: dict[str, Any]) -> list[Sample]:
         if len(self.buffer) == 0 or num_samples == 0:
             return []
-        
-        if self.args.partial_rollout:
-            # TODO(jiajun): Current buffer filter is too naive, and will cause performance degradation in sample selection
-            partial_ids = [i for i, s in enumerate(self.buffer) if s.status != Sample.Status.PENDING]
-            new_ids = [i for i, s in enumerate(self.buffer) if s.status == Sample.Status.PENDING]
-            
-            # Use configurable ratio of partial samples for dynamic
-            max_partial_samples = min(len(partial_ids), int(num_samples * self.args.partial_rollout_mix_ratio / self.args.n_samples_per_prompt) * self.args.n_samples_per_prompt)
-            selected_partial_ids = partial_ids[:max_partial_samples]
-            selected_partial_samples = [self.buffer[i] for i in selected_partial_ids]
-            
-            # Get remaining samples using regular filters
-            needed_new_samples_num = min(len(new_ids), num_samples - len(selected_partial_samples))
-            if needed_new_samples_num > 0:
-                selected_new_ids = new_ids[:needed_new_samples_num]
-                selected_new_samples = [self.buffer[i] for i in selected_new_ids]
-            else:
-                selected_new_ids = []
-                selected_new_samples = []
-            
-            samples = selected_partial_samples + selected_new_samples
-            # Manually remove samples from buffer
-            to_remove = set(selected_partial_ids + selected_new_ids)
-            self.buffer = [s for idx, s in enumerate(self.buffer) if idx not in to_remove]
-        else:
-            # Original behavior for non-partial rollout
-            samples = self.buffer_filter(self.buffer, num_samples)
+
+        samples = self.read_function(self.args, self.buffer, num_samples, rollout_info)
         return samples
 
-    async def add_samples(self, samples: list[Sample]):
+    async def add_samples(self, samples: list[Sample], rollout_info: dict[str, Any]):
+        """
+        Add a sample group to buffer.
+        """
         if not samples:
             return
-            
-        partial_samples = []
-        new_samples = []
-        
-        assert self.sample_index % self.args.n_samples_per_prompt == 0, f"Samples in a group should be continuous and divisible by n_samples_per_prompt {self.args.n_samples_per_prompt}"
-        for sample in samples:
-            sample.index = self.sample_index
-            self.sample_index += 1
-            if (sample.status != Sample.Status.PENDING):
-                partial_samples.append(sample)
-            else:
-                new_samples.append(sample)
-        
-        if partial_samples:
-            # Add partial samples to front of buffer for priority processing
-            self.buffer[:0] = partial_samples
-            
-        if new_samples:
-            # Add new samples to end of buffer
-            self.buffer.extend(new_samples)
+        assert len(samples) % self.args.n_samples_per_prompt == 0, f"Buffer add_samples got {len(samples)} samples, expected {self.args.n_samples_per_prompt}"
 
-        assert (len(new_samples) + len(partial_samples)) % self.args.n_samples_per_prompt == 0
-        print(f"Buffer size after adding samples: {len(self.buffer)} (adding {len(partial_samples)} partial samples and {len(new_samples)} new samples)", flush=True)
+        self.write_function(self.args, self.buffer, samples, rollout_info)
+        print(f"Buffer size after adding samples: {len(self.buffer)} (adding {len(samples)} samples)", flush=True)
 
     def generate(self, rollout_id, evaluation=False):
         if not evaluation and self.args.load_debug_rollout_data:

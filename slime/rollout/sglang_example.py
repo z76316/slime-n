@@ -41,7 +41,7 @@ TOKENIZER = None
 SEMAPHORE = None
 
 
-async def generate(args, rollout_id: int, sample: Sample, sampling_params) -> Sample:
+async def generate(args, sample: Sample, sampling_params) -> Sample:
     global TOKENIZER, SEMAPHORE
     if TOKENIZER is None:
         TOKENIZER = AutoTokenizer.from_pretrained(args.hf_checkpoint, trust_remote_code=True)
@@ -96,8 +96,6 @@ async def generate(args, rollout_id: int, sample: Sample, sampling_params) -> Sa
     response_token_ids = TOKENIZER(sample.response, add_special_tokens=False)["input_ids"]
     sample.tokens = prompt_tokens_ids + response_token_ids
     sample.response_length = len(response_token_ids)
-    if "rollout_id" not in sample.metadata:
-        sample.metadata["rollout_id"] = rollout_id
     match output["meta_info"]["finish_reason"]["type"]:
         case "length":
             sample.status = Sample.Status.TRUNCATED
@@ -109,11 +107,10 @@ async def generate(args, rollout_id: int, sample: Sample, sampling_params) -> Sa
     return sample
 
 
-async def generate_and_rm(args, rollout_id: int, sample: Sample, sampling_params: dict, evaluation=False) -> Sample:
+async def generate_and_rm(args, sample: Sample, sampling_params: dict, evaluation=False) -> Sample:
     # For samples with existing response, check if they're complete
     if sample.status == Sample.Status.COMPLETED or sample.status == Sample.Status.TRUNCATED:
         assert sample.response is not None and sample.reward is not None
-        assert sample.metadata.get("rollout_id", -1) != rollout_id
         return sample
     
     # generate
@@ -121,7 +118,7 @@ async def generate_and_rm(args, rollout_id: int, sample: Sample, sampling_params
         custom_generate_func = load_function(args.custom_generate_function_path)
         sample = await custom_generate_func(args, sample, sampling_params)
     else:
-        sample = await generate(args, rollout_id, sample, sampling_params)
+        sample = await generate(args, sample, sampling_params)
 
     if sample.status == Sample.Status.ABORTED:
         return sample
@@ -140,7 +137,7 @@ async def generate_and_rm(args, rollout_id: int, sample: Sample, sampling_params
     return sample
 
 
-async def generate_rollout_async(args, rollout_id, data_buffer) -> list[Sample]:
+async def generate_rollout_async(args, rollout_id: int, data_buffer) -> list[Sample]:
     """An example to implement the generate_rollout function for an rule based rm rollout generation.
 
     Args:
@@ -190,9 +187,6 @@ async def generate_rollout_async(args, rollout_id, data_buffer) -> list[Sample]:
         assert args.over_sampling_filter_input_size is not None
         # over sampling filter ensures over_sampling_filter_input_size samples are rollout. And pick rollout_batch_size samples from them.
         over_sampling_filter = load_function(args.over_sampling_filter_path)
-    partial_rollout_filter = None
-    if args.partial_rollout and args.partial_rollout_filter_path is not None:
-        partial_rollout_filter = load_function(args.partial_rollout_filter_path)
 
     def submit_generate_tasks(samples: list[Sample]):
         for sample in samples:
@@ -202,7 +196,6 @@ async def generate_rollout_async(args, rollout_id, data_buffer) -> list[Sample]:
                 asyncio.create_task(
                     generate_and_rm(
                         args,
-                        rollout_id,
                         sample,
                         sampling_params=sampling_params,
                         evaluation=False,
@@ -223,23 +216,24 @@ async def generate_rollout_async(args, rollout_id, data_buffer) -> list[Sample]:
                 case Sample.Status.TRUNCATED:
                     state.input_truncated_samples += 1
         else:
-            match sample.status:
-                case Sample.Status.ABORTED:
-                    state.output_aborted_samples += 1
-                case Sample.Status.COMPLETED:
-                    state.output_completed_samples += 1
-                case Sample.Status.TRUNCATED:
-                    state.output_truncated_samples += 1
-        if is_cached:
-            match sample.status:
-                case Sample.Status.PENDING:
-                    state.cached_pending_samples += 1
-                case Sample.Status.ABORTED:
-                    state.cached_aborted_samples += 1
-                case Sample.Status.COMPLETED:
-                    state.cached_completed_samples += 1
-                case Sample.Status.TRUNCATED:
-                    state.cached_truncated_samples += 1
+            if is_cached:
+                match sample.status:
+                    case Sample.Status.PENDING:
+                        state.cached_pending_samples += 1
+                    case Sample.Status.ABORTED:
+                        state.cached_aborted_samples += 1
+                    case Sample.Status.COMPLETED:
+                        state.cached_completed_samples += 1
+                    case Sample.Status.TRUNCATED:
+                        state.cached_truncated_samples += 1
+            else:
+                match sample.status:
+                    case Sample.Status.ABORTED:
+                        state.output_aborted_samples += 1
+                    case Sample.Status.COMPLETED:
+                        state.output_completed_samples += 1
+                    case Sample.Status.TRUNCATED:
+                        state.output_truncated_samples += 1
 
     data_group = {}
     data = []
@@ -267,12 +261,16 @@ async def generate_rollout_async(args, rollout_id, data_buffer) -> list[Sample]:
     target_data_size = (
         args.over_sampling_filter_input_size if over_sampling_filter is not None else args.rollout_batch_size
     ) * args.n_samples_per_prompt
+    # rollout_info is used for sending info to the buffer
+    rollout_info = {
+        "rollout_id": rollout_id,
+    }
 
     pbar = tqdm(total=target_data_size, desc="Rollout generation")
     while len(data) < target_data_size:
         while state.remaining_batch_size < target_data_size // args.n_samples_per_prompt:
             # get samples from the buffer and submit the generation requests.
-            samples = await data_buffer.get_samples(sampling_batch_size * args.n_samples_per_prompt)
+            samples = await data_buffer.get_samples(sampling_batch_size * args.n_samples_per_prompt, rollout_info)
             submit_generate_tasks(samples)
             for sample in samples:
                 update_state(sample, is_output=False, is_cached=False)
@@ -291,7 +289,7 @@ async def generate_rollout_async(args, rollout_id, data_buffer) -> list[Sample]:
             data_group[group_index].append(sample)
 
             assert sample.status == Sample.Status.COMPLETED or sample.status == Sample.Status.TRUNCATED, f"Sample {sample.index} has status {sample.status}, but should be completed or truncated. Rollout {rollout_id}, Sample prompt: {sample.prompt}, Sample response: {sample.response}"
-            update_state(sample, is_output=True)
+            update_state(sample, is_output=True, is_cached=False)
 
             if not len(data_group[group_index]) == args.n_samples_per_prompt:
                 # wait for the data_group for this prompt finishing
@@ -349,27 +347,18 @@ async def generate_rollout_async(args, rollout_id, data_buffer) -> list[Sample]:
                 data_group[group_index].append(sample)
 
         # try cache unfinished samples and excess valid samples back to buffer
-        cache_num = 0
         for group_index, samples in data_group.items():
             assert (
                 len(samples) == args.n_samples_per_prompt
             ), f"Got {len(samples)} samples, expected {args.n_samples_per_prompt}"
-            # Only store samples that have reasonable partial content
             cached_samples = []
             for sample in samples:
-                # For half-completed or complete samples from incomplete groups, cache them
-                if sample.status != Sample.Status.PENDING:
-                    if (partial_rollout_filter is not None and not partial_rollout_filter(args, sample)):
-                        # If the sample cannot pass partial rollout filter, we will regenerate it in the next iteration
-                        sample.response = None
-                        sample.metadata = {}
-                        sample.status = Sample.Status.PENDING
                 update_state(sample, is_output=True, is_cached=True)
                 cached_samples.append(sample)
             
             if len(cached_samples) > 0:
                 # Add cached samples back to buffer for next iteration
-                await data_buffer.add_samples(cached_samples)
+                await data_buffer.add_samples(cached_samples, rollout_info)
                 print(f"[DEBUG] Rollout {rollout_id}: Cached {len(cached_samples)} samples back to buffer", flush=True)
 
     if over_sampling_filter is not None:
@@ -448,7 +437,6 @@ async def eval_rollout_single_dataset(args, rollout_id, name, path):
             tasks.append(
                 generate_and_rm(
                     args,
-                    rollout_id,
                     sample,
                     sampling_params=sampling_params,
                     evaluation=True,

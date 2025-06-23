@@ -194,7 +194,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 ),
             )
 
-            # over sampling
+            # sampling
             parser.add_argument(
                 "--sampling-batch-size",
                 type=int,
@@ -228,7 +228,6 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                     "You could use `slime.rollout.filter_hub.over_sampling_filters.sort_by_reward_std` as an example."
                 ),
             )
-            # dynamic sampling
             parser.add_argument(
                 "--dynamic-sampling-filter-path",
                 type=str,
@@ -240,6 +239,8 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                     "You could use `slime.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std` as an example."
                 ),
             )
+            
+            # partial rollout
             parser.add_argument(
                 "--partial-rollout",
                 action="store_true",
@@ -251,15 +252,6 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 ),
             )
             parser.add_argument(
-                "--partial-rollout-filter-path",
-                type=str,
-                default="slime.rollout.filter_hub.partial_rollout_filters.valid_partial_sample",
-                help=(
-                    "This is the filter function for partial rollout. "
-                    "It should be able to select the samples in the buffer that are valid for partial rollout recycling."
-                ),
-            )
-            parser.add_argument(
                 "--partial-rollout-min-response-length",
                 type=int,
                 default=10,
@@ -268,7 +260,6 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                     "Shorter responses will be discarded."
                 ),
             )
-            
             parser.add_argument(
                 "--partial-rollout-min-tokens",
                 type=int,
@@ -277,7 +268,6 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                     "Minimum number of tokens in the response for a sample to be considered for partial rollout recycling."
                 ),
             )
-            
             parser.add_argument(
                 "--partial-rollout-mix-ratio",
                 type=float,
@@ -299,16 +289,25 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
             )
 
             parser.add_argument(
-                "--buffer-filter-path",
+                "--buffer-read-function-path",
                 type=str,
-                default="slime.rollout.filter_hub.buffer_filters.pop_first",
+                default="slime.rollout.buffer_hub.fifo.pop_first",
                 help=(
                     "Path to the buffer filter function. "
                     "It should be able to select the samples in the buffer. "
                     "The function should take a list of samples and return a list of samples."
                 ),
             )
-
+            parser.add_argument(
+                "--buffer-write-function-path",
+                type=str,
+                default="slime.rollout.buffer_hub.fifo.push_end",
+                help=(
+                    "Path to the buffer write function. "
+                    "It should be able to write the samples to the buffer. "
+                    "The function should take a list of samples and write them to the buffer."
+                ),
+            )
             # update weight
             parser.add_argument(
                 "--update-weight-buffer-size",
@@ -901,6 +900,10 @@ def parse_args(add_custom_arguments=None):
 
     if args.vocab_size and not args.padded_vocab_size:
         args.padded_vocab_size = _vocab_size_with_padding(args.vocab_size, args)
+    
+    if args.partial_rollout and args.buffer_read_function_path is None:
+        args.buffer_read_function_path = "slime.rollout.buffer_hub.partial_fifo.partial_pop_first"
+        args.buffer_write_function_path = "slime.rollout.buffer_hub.partial_fifo.partial_push_end"
 
     # placeholders
     args.seq_length = 4096

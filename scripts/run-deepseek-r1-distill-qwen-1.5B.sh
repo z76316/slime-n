@@ -14,7 +14,6 @@ set -ex
 
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=16
-
 # put wandb key here if error
 # export WANDB_KEY="abcdefg"
 
