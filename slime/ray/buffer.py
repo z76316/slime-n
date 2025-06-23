@@ -66,6 +66,7 @@ class Buffer:
                 metadata_key=args.metadata_key,
                 tool_key=args.tool_key,
                 apply_chat_template=args.apply_chat_template,
+                seed=args.rollout_seed,
             )
             if self.args.rollout_shuffle:
                 self.dataset.shuffle(self.epoch_id)

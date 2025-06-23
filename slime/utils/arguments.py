@@ -184,6 +184,15 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 default=False,
                 help=("Whether to shuffle the prompts during rollout."),
             )
+            parser.add_argument(
+                "--rollout-seed",
+                type=int,
+                default=42,
+                help=(
+                    "The seed for the random number generator during rollout. "
+                    "This is used to shuffle the prompts and also for the random sampling of the prompts."
+                ),
+            )
 
             # over sampling
             parser.add_argument(
