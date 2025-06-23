@@ -2,9 +2,7 @@ import multiprocessing
 import time
 from typing import List, Optional
 
-import aiohttp
 import requests
-from sglang.srt.entrypoints.EngineBase import EngineBase
 from sglang.srt.entrypoints.http_server import launch_server
 from sglang.srt.server_args import ServerArgs
 from sglang.srt.utils import kill_process_tree
@@ -57,7 +55,7 @@ def launch_server_process(server_args: ServerArgs) -> multiprocessing.Process:
     return p
 
 
-class HttpServerEngineAdapter(EngineBase):
+class HttpServerEngineAdapter:
     """
     You can use this class to launch a server from a VerlEngine instance.
     We recommend using this class only you need to use http server.
@@ -89,38 +87,10 @@ class HttpServerEngineAdapter(EngineBase):
         if self.node_rank != 0:
             return
 
-        if ("generate" in endpoint or "worker" in endpoint) and self.router_ip and self.router_port:
-            url = f"http://{self.router_ip}:{self.router_port}/{endpoint}"
-        else:
-            url = f"http://{self.server_args.host}:{self.server_args.port}/{endpoint}"
-
+        url = f"http://{self.server_args.host}:{self.server_args.port}/{endpoint}"
         response = requests.post(url, json=payload or {})
         response.raise_for_status()
         return response.json()
-
-    async def _make_request_async(self, endpoint: str, payload: Optional[dict] = None):
-        """Make an asynchronous POST request to the specified endpoint with the given payload.
-
-        Args:
-            endpoint: The API endpoint to call
-            payload: The JSON payload to send (default: empty dict)
-
-        Returns:
-            The JSON response from the server
-        """
-        if self.node_rank != 0:
-            return
-
-        if ("generate" in endpoint or "worker" in endpoint) and self.router_ip and self.router_port:
-            url = f"http://{self.router_ip}:{self.router_port}/{endpoint}"
-        else:
-            url = f"http://{self.server_args.host}:{self.server_args.port}/{endpoint}"
-
-        timeout = aiohttp.ClientTimeout(total=None, connect=None, sock_connect=None, sock_read=None)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(url, json=payload or {}) as response:
-                response.raise_for_status()
-                return await response.json(content_type=None)
 
     def update_weights_from_tensor(
         self,
@@ -163,65 +133,6 @@ class HttpServerEngineAdapter(EngineBase):
             f"http://{self.router_ip}:{self.router_port}/remove_worker?url=http://{self.server_args.host}:{self.server_args.port}"
         )
         kill_process_tree(self.process.pid)
-
-    def generate(
-        self,
-        prompt=None,
-        sampling_params=None,
-        input_ids=None,
-        image_data=None,
-        return_logprob=False,
-        logprob_start_len=None,
-        top_logprobs_num=None,
-        token_ids_logprob=None,
-        lora_path=None,
-        custom_logit_processor=None,
-    ):
-        payload = {
-            "text": prompt,
-            "sampling_params": sampling_params,
-            "input_ids": input_ids,
-            "image_data": image_data,
-            "return_logprob": return_logprob,
-            "logprob_start_len": logprob_start_len,
-            "top_logprobs_num": top_logprobs_num,
-            "token_ids_logprob": token_ids_logprob,
-            "lora_path": lora_path,
-            "custom_logit_processor": custom_logit_processor,
-        }
-        # Filter out None values
-        payload = {k: v for k, v in payload.items() if v is not None}
-
-        return self._make_request("generate", payload)
-
-    async def generate_async(
-        self,
-        prompt=None,
-        sampling_params=None,
-        input_ids=None,
-        image_data=None,
-        return_logprob=False,
-        logprob_start_len=None,
-        top_logprobs_num=None,
-        token_ids_logprob=None,
-        lora_path=None,
-        custom_logit_processor=None,
-    ):
-        payload = {
-            "text": prompt,
-            "sampling_params": sampling_params,
-            "input_ids": input_ids,
-            "image_data": image_data,
-            "return_logprob": return_logprob,
-            "logprob_start_len": logprob_start_len,
-            "top_logprobs_num": top_logprobs_num,
-            "token_ids_logprob": token_ids_logprob,
-            "lora_path": lora_path,
-            "custom_logit_processor": custom_logit_processor,
-        }
-        # Filter out None values
-        payload = {k: v for k, v in payload.items() if v is not None}
-        return await self._make_request_async("generate", payload)
 
     def release_memory_occupation(self):
         return self._make_request("release_memory_occupation")

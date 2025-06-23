@@ -77,13 +77,6 @@ class SglangEngine:
             router_ip=args.sglang_router_ip, router_port=args.sglang_router_port, **kwargs
         )
 
-    def generate(self, prompts, sampling_params, *args, **kwargs):
-        outputs = self.llm.generate(prompt=prompts, sampling_params=sampling_params)
-        return outputs
-
-    async def generate_async(self, prompt, sampling_params, *args, **kwargs):
-        return await self.llm.generate_async(prompt=prompt, sampling_params=sampling_params)
-
     def init_process_group(self, master_address, master_port, rank_offset, world_size, group_name, backend):
         return self.llm.init_weights_update_group(
             master_address, master_port, rank_offset, world_size, group_name, backend

@@ -14,19 +14,9 @@ from .utils import Lock
 
 @ray.remote
 class RolloutRayActor(RayActor):
-    def __init__(
-        self,
-        args,
-        rank: int,
-        data_buffer: Buffer = None,
-        bundle_indices: list = None,
-    ):
+    def __init__(self, args, rank: int):
         self.args = args
-
         self.rank = rank
-        self.world_size = args.rollout_num_gpus // args.rollout_num_gpus_per_engine
-        self.data_buffer = data_buffer
-        self.bundle_indices = bundle_indices
 
     def init(self, dist_init_addr, port, nccl_port, other_ports, used_ports):
         # build infer engine
@@ -74,7 +64,7 @@ class RolloutRayActor(RayActor):
         self.infer_engine.continue_generation()
 
 
-def create_rollout_engines(args, pg, data_buffer: Buffer = None):
+def create_rollout_engines(args, pg):
     if args.debug_train_only:
         return []
 
@@ -99,11 +89,7 @@ def create_rollout_engines(args, pg, data_buffer: Buffer = None):
                 num_cpus=num_cpus,
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
-            ).remote(
-                args,
-                rank=i,
-                data_buffer=data_buffer,
-            )
+            ).remote(args, rank=i)
         )
 
     # get ports
@@ -208,7 +194,7 @@ class RolloutGroup:
             num_gpus=0,
         ).remote(args)
 
-        self.all_rollout_engines = create_rollout_engines(args, pg, self.data_buffer)
+        self.all_rollout_engines = create_rollout_engines(args, pg)
         nodes_per_engine = max(1, args.rollout_num_gpus_per_engine // 8)
         # when doing multi-node serving, we will only send request to node-0 for each engine.
         self.rollout_engines = self.all_rollout_engines[::nodes_per_engine]
