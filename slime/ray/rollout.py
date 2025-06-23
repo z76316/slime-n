@@ -226,16 +226,18 @@ class RolloutGroup:
         self.args.sglang_router_ip = get_host_info()[1]
         self.args.sglang_router_port = find_available_port(random.randint(3000, 4000))
 
+        router_args = RouterArgs(
+            host=self.args.sglang_router_ip,
+            port=self.args.sglang_router_port,
+            balance_abs_threshold=0,
+        )
+
+        if hasattr(router_args, "log_level"):
+            router_args.log_level = "warn"
+
         process = multiprocessing.Process(
             target=run_router,
-            args=(
-                RouterArgs(
-                    host=self.args.sglang_router_ip,
-                    port=self.args.sglang_router_port,
-                    balance_abs_threshold=0,
-                    log_level="warn",
-                ),
-            ),
+            args=(router_args,),
         )
         process.daemon = True  # Set the process as a daemon
         process.start()

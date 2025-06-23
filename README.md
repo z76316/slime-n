@@ -45,7 +45,8 @@ cd slime
 pip install -e .
 ```
 
-  - We are collaborating with the SGLang community to merge the updates in [sglang.patch](docker/patch/sglang.patch) into the main branch.
+- We are collaborating with the SGLang community to merge the updates in [sglang.patch](docker/patch/sglang.patch) into the main branch.
+- If you prefer not to use Docker, or if it's inconvenient, please refer to [Setting up the Environment from Scratch](./docs/en/build.md).
 
 ### Example: GLM4-9B and Qwen3-4B
 
