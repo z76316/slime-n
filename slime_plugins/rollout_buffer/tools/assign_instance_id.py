@@ -6,8 +6,7 @@ from pathlib import Path
 def main(input_path, task_type="math", output_path=None):
     input_path = Path(input_path)
     if output_path is None:
-        output_path = input_path.with_suffix(".processed.jsonl")
-
+        output_path = str(input_path).replace(".jsonl", "_processed.jsonl")
     used_ids = set()
     processed = []
 

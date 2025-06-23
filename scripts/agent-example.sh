@@ -20,7 +20,7 @@ export CP_SIZE=1
 
 export HF_MODEL_PATH=/root/hf_models/deepseek-ai--DeepSeek-R1-Distill-Qwen-7B
 export MCORE_MODEL_PATH=/root/megatron_model/DeepSeek-R1-Distill-Qwen-7B-25.02
-export PROMPT_DATA=/root/deepscaler_rl_buffer_instance_id.jsonl
+export PROMPT_DATA=/root/dapo-math-17k/dapo-math-17k_processed.jsonl
 export MCORE_MODEL_PATH_SAVE=/root/megatron_model/DeepSeek-R1-Distill-Qwen-7B-25.02_save
 
 # DeepSeek-R1-Distill-Qwen-7B

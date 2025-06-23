@@ -98,7 +98,7 @@ def worker_process(task_queue, done_queue, rollout_func, reward_func, client, sa
             item = line
 
         # try:
-        messages = rollout_func(client, item["messages"], sampling_params)
+        messages = rollout_func(client, item["prompt"], sampling_params)
 
         item["uid"] = str(uuid.uuid4())
         item["messages"] = messages
