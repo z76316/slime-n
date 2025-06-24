@@ -84,6 +84,7 @@ class TrainRayActor(RayActor):
             (self.model, self.optimizer, self.opt_param_scheduler, loaded_rollout_id) = (
                 megatron_utils.initialize_model_and_optimizer(args, with_optimizer=True)
             )
+            clear_memory()
             start_rollout_id = loaded_rollout_id + 1
 
         if self.args.offload:
@@ -136,23 +137,6 @@ class TrainRayActor(RayActor):
                 self.params_dict[name] = torch.empty_like(param, device=torch.device("cpu"), pin_memory=True)
             self.params_dict[name].copy_(param.detach(), non_blocking=True)
         torch.cuda.synchronize()
-
-    def get_parallel_config(self):
-        assert dist.is_initialized()
-        return {
-            "rank": dist.get_rank(),
-            "world_size": dist.get_world_size(),
-            "dp_rank": mpu.get_data_parallel_rank(with_context_parallel=False),
-            "dp_size": mpu.get_data_parallel_world_size(with_context_parallel=False),
-            "tp_rank": mpu.get_tensor_model_parallel_rank(),
-            "tp_size": mpu.get_tensor_model_parallel_world_size(),
-            "pp_rank": mpu.get_pipeline_model_parallel_rank(),
-            "pp_size": mpu.get_pipeline_model_parallel_world_size(),
-            "cp_rank": mpu.get_context_parallel_rank(),
-            "cp_size": mpu.get_context_parallel_world_size(),
-            "ep_rank": mpu.get_expert_model_parallel_rank(),
-            "ep_size": mpu.get_expert_model_parallel_world_size(),
-        }
 
     def sleep(self, tags):
         assert self.args.offload
@@ -624,21 +608,6 @@ class RayTrainGroup:
         """
         self.rollout = rollout
         ray.get([actor.set_data_buffer.remote(rollout.data_buffer) for actor in self._actor_handlers])
-        actor_parallel_configs = ray.get([actor.get_parallel_config.remote() for actor in self._actor_handlers])
-        parallel_config = {}
-        for rank, config in enumerate(actor_parallel_configs):
-            assert config["rank"] == rank and config["world_size"] == len(self._actor_handlers)
-            config.pop("rank")
-            for key, value in config.items():
-                if "size" in key and key:
-                    if key not in parallel_config:
-                        parallel_config[key] = value
-                    else:
-                        assert (
-                            parallel_config[key] == value
-                        ), f"mismatch {key} on rank {rank}: {parallel_config[key]} != {value}"
-        parallel_config["actors"] = actor_parallel_configs
-        ray.get(rollout.async_set_parallel_config(parallel_config))
 
         return [
             actor.connect_rollout_engines.remote(

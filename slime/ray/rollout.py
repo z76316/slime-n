@@ -34,9 +34,6 @@ class RolloutRayActor(RayActor):
             # offload the engine to the CPU
             self.infer_engine.sleep()
 
-    def set_parallel_config(self, parallel_config):
-        self.parallel_config = parallel_config
-
     def init_process_group(self, master_address, master_port, rank_offset, world_size, group_name, backend):
         return self.infer_engine.init_process_group(
             master_address, master_port, rank_offset, world_size, group_name, backend
@@ -238,13 +235,6 @@ class RolloutGroup:
 
     def async_reset_prefix_cache(self):
         return [engine.reset_prefix_cache.remote() for engine in self.rollout_engines]
-
-    def async_set_parallel_config(self, parallel_config):
-        """
-        Let every engine know how the training parallel config.
-        """
-        self.parallel_config = parallel_config
-        return [engine.set_parallel_config.remote(parallel_config) for engine in self.rollout_engines]
 
     def async_offload(self):
         return [engine.sleep.remote() for engine in self.rollout_engines]
