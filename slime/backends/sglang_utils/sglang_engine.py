@@ -82,11 +82,11 @@ class SglangEngine:
             master_address, master_port, rank_offset, world_size, group_name, backend
         )
 
-    def update_weight_from_distributed(self, names, dtypes, shapes, group_name):
+    def update_weights_from_distributed(self, names, dtypes, shapes, group_name):
         self.llm.update_weights_from_distributed(names, dtypes, shapes, group_name)
         return
 
-    def update_weight_from_cuda_ipc(self, ipc_handles):
+    def update_weights_from_tensor(self, ipc_handles):
         self.llm.update_weights_from_tensor(ipc_handles)
         return
 

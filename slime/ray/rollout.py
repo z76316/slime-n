@@ -42,11 +42,11 @@ class RolloutRayActor(RayActor):
             master_address, master_port, rank_offset, world_size, group_name, backend
         )
 
-    def update_weight_from_distributed(self, names, dtypes, shapes, group_name):
-        return self.infer_engine.update_weight_from_distributed(names, dtypes, shapes, group_name)
+    def update_weights_from_distributed(self, names, dtypes, shapes, group_name):
+        return self.infer_engine.update_weights_from_distributed(names, dtypes, shapes, group_name)
 
-    def update_weight_from_cuda_ipc(self, ipc_handles):
-        return self.infer_engine.update_weight_from_cuda_ipc(ipc_handles)
+    def update_weights_from_tensor(self, ipc_handles):
+        return self.infer_engine.update_weights_from_tensor(ipc_handles)
 
     def reset_prefix_cache(self):
         self.infer_engine.reset_prefix_cache()

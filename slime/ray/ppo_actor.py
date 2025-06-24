@@ -430,7 +430,7 @@ class TrainRayActor(RayActor):
             time.sleep(0.1)
 
         refs = [
-            engine.update_weight_from_distributed.remote(
+            engine.update_weights_from_distributed.remote(
                 names=[name for name, _ in converted_named_tensors],
                 dtypes=[param.dtype for _, param in converted_named_tensors],
                 shapes=[param.shape for _, param in converted_named_tensors],
@@ -449,7 +449,7 @@ class TrainRayActor(RayActor):
         converted_named_tensors.clear()
         ray.get(self.rollout_engine_lock.release.remote())
 
-    def update_weights_from_cuda_ipc(self):
+    def update_weights_from_tensor(self):
         pp_size = mpu.get_pipeline_model_parallel_world_size()
         ep_size = mpu.get_expert_model_parallel_world_size()
         rank = dist.get_rank()
@@ -511,9 +511,9 @@ class TrainRayActor(RayActor):
                         self.args, self.model_name, info.name, param, self.quantization_config
                     )
                 )
-            self._update_converted_params_from_cuda_ipc(converted_named_tensors)
+            self._update_converted_params_from_tensor(converted_named_tensors)
 
-    def _update_converted_params_from_cuda_ipc(self, converted_named_tensors):
+    def _update_converted_params_from_tensor(self, converted_named_tensors):
         monkey_patch_torch_reductions()
         ipc_handle = MultiprocessingSerializer.serialize(converted_named_tensors, output_str=True)
         ipc_handles = (
@@ -527,7 +527,7 @@ class TrainRayActor(RayActor):
         )
 
         if dist.get_rank() == self._ipc_gather_src:
-            ref = self._ipc_engine.update_weight_from_cuda_ipc.remote(
+            ref = self._ipc_engine.update_weights_from_tensor.remote(
                 ipc_handles=ipc_handles,
             )
             ray.get(ref)
@@ -544,7 +544,7 @@ class TrainRayActor(RayActor):
         if not self.args.colocate:
             self.update_weights_from_distributed()
         else:
-            self.update_weights_from_cuda_ipc()
+            self.update_weights_from_tensor()
 
         dist.barrier()
         clear_memory()

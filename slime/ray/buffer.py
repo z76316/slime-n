@@ -1,6 +1,7 @@
 import copy
 import logging
 import os
+import pickle
 from typing import Any, Union
 
 import ray
@@ -174,10 +175,12 @@ class Buffer:
         self.buffer.extend(samples)
 
     def generate(self, rollout_id, evaluation=False):
-        if self.args.load_debug_rollout_data:
-            data = torch.load(self.args.load_debug_rollout_data.format(rollout_id=rollout_id, evaluation=evaluation))
-            data_pool = self.eval_data_pool if evaluation else self.train_data_pool
-            data_pool[rollout_id] = data
+        if not evaluation and self.args.load_debug_rollout_data:
+            data = pickle.load(
+                open(self.args.load_debug_rollout_data.format(rollout_id=rollout_id), "rb"),
+            )
+            data = [Sample(**sample) for sample in data]
+            self.train_data_pool[rollout_id] = convert_samples_to_train_data(data)
             return
 
         generate_rollout = self.eval_generate_rollout if evaluation else self.generate_rollout
@@ -194,12 +197,12 @@ class Buffer:
     def set_data(self, rollout_id, data: Union[list[Sample], Any], evaluation=False):
         data_pool = self.eval_data_pool if evaluation else self.train_data_pool
         if not evaluation:
-            data = convert_samples_to_train_data(data)
             if self.args.save_debug_rollout_data:
-                torch.save(
-                    data,
-                    self.args.save_debug_rollout_data.format(rollout_id=rollout_id),
+                pickle.dump(
+                    [sample.__dict__ for sample in data],
+                    open(self.args.save_debug_rollout_data.format(rollout_id=rollout_id), "wb"),
                 )
+            data = convert_samples_to_train_data(data)
         data_pool[rollout_id] = data
 
     def update_metadata(self, metadata: dict):
