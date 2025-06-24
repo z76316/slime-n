@@ -560,7 +560,8 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
             parser.add_argument(
                 "--log-multi-turn",
                 action="store_true",
-                default="Whether to log information for multi-turn rollout.",
+                default=False,
+                help="Whether to log information for multi-turn rollout.",
             )
             parser.add_argument(
                 "--log-passrate",

@@ -303,6 +303,11 @@ def train_one_step(args, rollout_id, step_id, data_iterator, model, optimizer, o
         assert update_successful
         opt_param_scheduler.step(increment=args.global_batch_size)
 
+    # release grad
+    for model_chunk in model:
+        model_chunk.zero_grad_buffer()
+    optimizer.zero_grad()
+
     # Empty unused memory.
     if args.empty_unused_memory_level >= 2:
         torch.cuda.empty_cache()

@@ -150,38 +150,38 @@ class TrainRayActor(RayActor):
             self.params_dict[name].copy_(param.detach(), non_blocking=True)
         torch.cuda.synchronize()
 
+    @timer
     def sleep(self, tags):
         assert self.args.offload
         assert "model" in tags
-        with timer("sleep"):
-            if isinstance(tags, str):
-                tags = (tags,)
+        if isinstance(tags, str):
+            tags = (tags,)
 
-            clear_memory()
-            print_memory(f"before offload model")
+        clear_memory()
+        print_memory(f"before offload model")
 
-            self.update_cpu_params_dict()
+        self.update_cpu_params_dict()
 
-            allocator = CuMemAllocator.get_instance()
-            allocator.sleep(offload_tags=tags)
+        allocator = CuMemAllocator.get_instance()
+        allocator.sleep(offload_tags=tags)
 
-            clear_memory()
-            print_memory(f"after offload model")
+        clear_memory()
+        print_memory(f"after offload model")
 
+    @timer
     def wake_up(self, tags):
         assert self.args.offload
-        with timer("wake_up"):
-            clear_memory()
-            print_memory("before wake_up model")
+        clear_memory()
+        print_memory("before wake_up model")
 
-            if isinstance(tags, str):
-                tags = (tags,)
+        if isinstance(tags, str):
+            tags = (tags,)
 
-            allocator = CuMemAllocator.get_instance()
-            allocator.wake_up(tags)
+        allocator = CuMemAllocator.get_instance()
+        allocator.wake_up(tags)
 
-            clear_memory()
-            print_memory("after wake_up model")
+        clear_memory()
+        print_memory("after wake_up model")
 
     def connect_rollout_engines(self, rollout_engines, rollout_engine_lock):
         self.rollout_engines = rollout_engines
@@ -290,60 +290,59 @@ class TrainRayActor(RayActor):
 
             print_memory("begin train")
 
-            with timer("ref_log_probs"):
-                if self.ref is not None:
-                    if self.args.offload_ref:
-                        for model_module in self.ref:
-                            model_module.to(device=torch.cuda.current_device(), non_blocking=True)
-                        print_memory("after load ref model")
+            if self.ref is not None:
+                if self.args.offload_ref:
+                    for model_module in self.ref:
+                        model_module.to(device=torch.cuda.current_device(), non_blocking=True)
+                    print_memory("after load ref model")
 
-                    with timer("ref_log_probs_forward"):
-                        megatron_utils.forward_only(
-                            self.args,
-                            self.ref,
-                            log_probs_data_iterator,
-                            log_probs_num_microbatches,
-                            store_prefix="ref_",
-                        )
+                with timer("ref_log_probs"):
+                    megatron_utils.forward_only(
+                        self.args,
+                        self.ref,
+                        log_probs_data_iterator,
+                        log_probs_num_microbatches,
+                        store_prefix="ref_",
+                    )
 
-                    # TODO: we should offload ref model here. But some how CuMemAllocator will raise error.
-                    if self.args.offload_ref:
-                        for model_module in self.ref:
-                            model_module.to(device="cpu", non_blocking=True)
-                        clear_memory()
-                        print_memory("after offload ref model")
+                # TODO: we should offload ref model here. But some how CuMemAllocator will raise error.
+                if self.args.offload_ref:
+                    for model_module in self.ref:
+                        model_module.to(device="cpu", non_blocking=True)
+                    clear_memory()
+                    print_memory("after offload ref model")
 
             # reset data iterator
             for data_iterator in log_probs_data_iterator:
                 data_iterator.reset()
 
             # Calculate logprob, the results will be stored on last pp stage.
-            with timer("log_probs"):
-                if self.old_actor is not None:
-                    if self.args.offload_rollout:
-                        for model_module in self.old_actor:
-                            model_module.to(device=torch.cuda.current_device(), non_blocking=True)
-                        print_memory("after load rollout model")
-                    with timer("rollout_log_probs_forward"):
-                        megatron_utils.forward_only(
-                            self.args,
-                            self.old_actor,
-                            log_probs_data_iterator,
-                            log_probs_num_microbatches,
-                        )
+            if self.old_actor is not None:
+                if self.args.offload_rollout:
+                    for model_module in self.old_actor:
+                        model_module.to(device=torch.cuda.current_device(), non_blocking=True)
+                    print_memory("after load rollout model")
+                with timer("rollout_log_probs"):
+                    megatron_utils.forward_only(
+                        self.args,
+                        self.old_actor,
+                        log_probs_data_iterator,
+                        log_probs_num_microbatches,
+                    )
 
-                    if self.args.offload_rollout:
-                        for model_module in self.old_actor:
-                            model_module.to(device="cpu", non_blocking=True)
-                        torch.cuda.empty_cache()
-                        print_memory("after offload rollout model")
+                if self.args.offload_rollout:
+                    for model_module in self.old_actor:
+                        model_module.to(device="cpu", non_blocking=True)
+                    torch.cuda.empty_cache()
+                    print_memory("after offload rollout model")
 
-                    if self.args.offload:
-                        self.wake_up("model")
-                else:
-                    if self.args.offload:
-                        self.wake_up("model")
+                if self.args.offload:
+                    self.wake_up("model")
+            else:
+                if self.args.offload:
+                    self.wake_up("model")
 
+                with timer("log_probs"):
                     megatron_utils.forward_only(
                         self.args,
                         self.model,
@@ -353,15 +352,12 @@ class TrainRayActor(RayActor):
 
             # Calculate adv and returns. Need to performed before training (instead of on the fly),
             # because we may need normalize the whole rollout.
-            with timer("compute_advantages_and_returns"):
-                megatron_utils.compute_advantages_and_returns(self.args)
+            megatron_utils.compute_advantages_and_returns(self.args)
 
             if self.rollout_data_postprocess is not None:
-                with timer("rollout_data_postprocess"):
-                    self.rollout_data_postprocess(self.args)
+                self.rollout_data_postprocess(self.args)
 
-            with timer("log_rollout_data"):
-                megatron_utils.log_rollout_data(rollout_id, self.args)
+            megatron_utils.log_rollout_data(rollout_id, self.args)
 
             # Train
             with timer("actor_train"):
@@ -374,10 +370,9 @@ class TrainRayActor(RayActor):
                     train_num_microbatches,
                 )
 
-        with timer("log_perf_data"):
-            megatron_utils.log_perf_data(rollout_id, self.args)
-        Timer().start("train_wait")
+        megatron_utils.log_perf_data(rollout_id, self.args)
         megatron_utils.data.clear_local_storage()
+        Timer().start("train_wait")
 
     def eval(self, rollout_id):
         # TODO: is logging enough?
