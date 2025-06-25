@@ -1,3 +1,4 @@
+import socket
 import ray
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
@@ -13,9 +14,23 @@ class InfoActor:
 
 
 def sort_key(x):
-    index, node_ip, gpu_id = x
+    index, node_identifier, gpu_id = x
     # Sort by node IP number and then by GPU ID
-    node_ip_parts = list(map(int, node_ip.split(".")))
+    try:
+        # try to parse it as an IP address.
+        ip_address = node_identifier
+        node_ip_parts = list(map(int, ip_address.split(".")))
+    except ValueError:
+        # Try to resolve the hostname to an IP address.
+        try:
+            ip_address = socket.gethostbyname(node_identifier)
+            node_ip_parts = list(map(int, ip_address.split(".")))
+        except (socket.gaierror, TypeError):
+            # Instead, we convert each character of the original identifier string
+            # to its ASCII value. This provides a stable and consistent numerical
+            # representation that allows for sorting.
+            node_ip_parts = [ord(c) for c in node_identifier]
+
     return (node_ip_parts, gpu_id)
 
 
