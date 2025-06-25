@@ -15,9 +15,6 @@ set -ex
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=16
 
-# put wandb key here if error
-# export WANDB_KEY="abcdefg"
-
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/models/qwen3-4B.sh"
 
@@ -53,7 +50,7 @@ ROLLOUT_ARGS=(
    # --partial-rollout-mix-ratio 0.75 
    # --over-sampling-filter-path slime.rollout.filter_hub.over_sampling_filters.sort_by_reward_std
    # --over-sampling-filter-input-size 48
-   --dynamic-sampling-filter-path slime.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
+   # --dynamic-sampling-filter-path slime.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
 )
 
 EVAL_ARGS=(

@@ -5,7 +5,6 @@ __pycache__/
 
 # C extensions
 *.so
-*.out
 
 # Distribution / packaging
 .Python
@@ -180,3 +179,4 @@ tests/
 local/
 **/rollout_data/
 **/buffer_stats/
+*.out

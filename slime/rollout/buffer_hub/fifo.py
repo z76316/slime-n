@@ -1,5 +1,7 @@
-from slime.utils.types import Sample
 from typing import Any
+
+from slime.utils.types import Sample
+
 
 # Simple operations
 def push_end(args, buffer: list[list[Sample]], samples: list[Sample], rollout_info: dict[str, Any]):
@@ -7,6 +9,7 @@ def push_end(args, buffer: list[list[Sample]], samples: list[Sample], rollout_in
     Simply append the samples to the end of the buffer.
     """
     buffer.append(samples)
+
 
 def pop_first(args, buffer: list[list[Sample]], num_samples: int, rollout_info: dict[str, Any]):
     """

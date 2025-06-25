@@ -14,8 +14,6 @@ set -ex
 
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=16
-# put wandb key here if error
-# export WANDB_KEY="abcdefg"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/models/qwen2.5-1.5B.sh"
@@ -23,8 +21,8 @@ source "${SCRIPT_DIR}/models/qwen2.5-1.5B.sh"
 CKPT_ARGS=(
    --hf-checkpoint /root/DeepSeek-R1-Distill-Qwen-1.5B
    --ref-load /root/DeepSeek-R1-Distill-Qwen-1.5B_torch_dist
-   # --load /root/DeepSeek-R1-Distill-Qwen-1.5B_slime/
-   # --save /root/DeepSeek-R1-Distill-Qwen-1.5B_slime/
+   --load /root/DeepSeek-R1-Distill-Qwen-1.5B_slime/
+   --save /root/DeepSeek-R1-Distill-Qwen-1.5B_slime/
    --save-interval 20
 )
 
@@ -51,7 +49,7 @@ ROLLOUT_ARGS=(
    # --partial-rollout-mix-ratio 0.75 
    # --over-sampling-filter-path slime.rollout.filter_hub.over_sampling_filters.sort_by_reward_std
    # --over-sampling-filter-input-size 192
-   --dynamic-sampling-filter-path slime.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
+   # --dynamic-sampling-filter-path slime.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
 )
 
 EVAL_ARGS=(
@@ -100,7 +98,7 @@ OPTIMIZER_ARGS=(
 )
 
 WANDB_ARGS=(
-    #--use-wandb
+   # --use-wandb
    # --wandb-project slime-dev
    # --wandb-group qwen2.5-1.5B-test
    # --wandb-key ${WANDB_KEY}

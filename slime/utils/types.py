@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
-from typing import Optional
 from enum import Enum
+from typing import Optional
+
 import torch
+
 
 @dataclass
 class Sample:
@@ -17,13 +19,15 @@ class Sample:
     loss_mask: Optional[list[int]] = None
     metadata: dict = field(default_factory=dict)
     version: int = 0
-    
+
     class Status(Enum):
         PENDING = "pending"
         COMPLETED = "completed"
         TRUNCATED = "truncated"
         ABORTED = "aborted"
+
     status: Status = Status.PENDING
+
 
 @dataclass
 class ParamInfo:

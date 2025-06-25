@@ -1,14 +1,13 @@
 import asyncio
 import copy
-from dataclasses import dataclass, field
-from typing import Any, DefaultDict, Set, Counter
-from collections import defaultdict 
 import json
+from collections import defaultdict
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Counter, DefaultDict
 
 from tqdm import tqdm
 from transformers import AutoTokenizer
-import wandb
 
 from slime.utils.async_utils import run
 from slime.utils.data import JsonlDataset
@@ -23,24 +22,22 @@ __all__ = ["generate_rollout"]
 
 @dataclass
 class GenerateState:
-    remaining_batch_size: int = 0 # the number of samples that are done/running/pending
-    pendings: set = None # the set of pending tasks
-    num_stats: DefaultDict[str, Counter] = field(
-        default_factory=lambda: defaultdict(Counter)
-    )
+    remaining_batch_size: int = 0  # the number of samples that are done/running/pending
+    pendings: set = None  # the set of pending tasks
+    num_stats: DefaultDict[str, Counter] = field(default_factory=lambda: defaultdict(Counter))
+
     def bump(self, group: str, value: str, n: int):
         self.num_stats[group][value] += n
+
     def stats_to_string(self) -> str:
-        flat = {
-            f"{g}_{k}_samples": v
-            for g, ctr in self.num_stats.items()
-            for k, v in ctr.items()
-        }
+        flat = {f"{g}_{k}_samples": v for g, ctr in self.num_stats.items() for k, v in ctr.items()}
         return json.dumps(flat, ensure_ascii=False)
+
 
 def update_num_stats(state: GenerateState, group: str, value: Any, n: int = 1):
     vstr = value.name.lower() if isinstance(value, Enum) else str(value)
     state.bump(group, vstr, n)
+
 
 TOKENIZER = None
 SEMAPHORE = None
@@ -57,9 +54,11 @@ async def generate(args, sample: Sample, sampling_params) -> Sample:
         )
 
     url = f"http://{args.sglang_router_ip}:{args.sglang_router_port}/generate"
-    
-    assert sample.status == Sample.Status.PENDING or sample.status == Sample.Status.ABORTED, f"Sample status is {sample.status}"
-    is_partial_sample = (sample.status == Sample.Status.ABORTED)
+
+    assert (
+        sample.status == Sample.Status.PENDING or sample.status == Sample.Status.ABORTED
+    ), f"Sample status is {sample.status}"
+    is_partial_sample = sample.status == Sample.Status.ABORTED
     # Handle partial rollout samples: continue generation from existing response
     if is_partial_sample:
         # Continue generation from partial response
@@ -67,13 +66,13 @@ async def generate(args, sample: Sample, sampling_params) -> Sample:
     else:
         # Regular generation from prompt
         input_text = sample.prompt
-    
+
     payload = {
         "text": input_text,
         "sampling_params": sampling_params,
     }
 
-    max_retries = 5
+    max_retries = 60
     retry_count = 0
     while retry_count < max_retries:
         try:
@@ -90,7 +89,7 @@ async def generate(args, sample: Sample, sampling_params) -> Sample:
         break
 
     prompt_tokens_ids = TOKENIZER(sample.prompt, add_special_tokens=False)["input_ids"]
-    
+
     if is_partial_sample:
         # For partial rollout: combine existing response with new generation
         sample.response = sample.response + output["text"]
@@ -117,7 +116,7 @@ async def generate_and_rm(args, sample: Sample, sampling_params: dict, evaluatio
     if sample.status == Sample.Status.COMPLETED or sample.status == Sample.Status.TRUNCATED:
         assert sample.response is not None and sample.reward is not None
         return sample
-    
+
     # generate
     if args.custom_generate_function_path is not None:
         custom_generate_func = load_function(args.custom_generate_function_path)
@@ -182,7 +181,7 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer) -> list[Sam
         remaining_batch_size=0,
         pendings=set(),
     )
-    
+
     dynamic_filter = None
     if args.dynamic_sampling_filter_path is not None:
         # dynamic filter is used to filter out samples that is not suitable for training
@@ -228,8 +227,9 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer) -> list[Sam
             # NOTE: Using empty string as rid to abort ALL requests by startswith() match
             print(f"Abort request for {url}", flush=True)
             await post(f"{url}/abort_request", {"rid": ""}, use_http2=False)
+
     have_aborted = False
-    
+
     # target_data_size is the total number of valid samples to get
     # if over_sampling_filter_input_size is set, we will use it as the target data size, otherwise, we will use the rollout_batch_size
     target_data_size = (
@@ -248,7 +248,7 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer) -> list[Sam
             submit_generate_tasks(samples)
             for sample in samples:
                 update_num_stats(state, "input", sample.status)
-        
+
         # wait for the generation to finish
         done, state.pendings = await asyncio.wait(state.pendings, return_when=asyncio.FIRST_COMPLETED)
         # Always finish all done tasks. This will make the code of partial rollout cleaner.
@@ -262,7 +262,9 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer) -> list[Sam
                 data_group[group_index] = []
             data_group[group_index].append(sample)
 
-            assert sample.status == Sample.Status.COMPLETED or sample.status == Sample.Status.TRUNCATED, f"Sample {sample.index} has status {sample.status}, but should be completed or truncated. Rollout {rollout_id}, Sample prompt: {sample.prompt}, Sample response: {sample.response}"
+            assert (
+                sample.status == Sample.Status.COMPLETED or sample.status == Sample.Status.TRUNCATED
+            ), f"Sample {sample.index} has status {sample.status}, but should be completed or truncated. Rollout {rollout_id}, Sample prompt: {sample.prompt}, Sample response: {sample.response}"
             update_num_stats(state, "output", sample.status)
 
             if not len(data_group[group_index]) == args.n_samples_per_prompt:
@@ -278,25 +280,25 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer) -> list[Sam
                         sample.reward = rewards[i][args.reward_key]
                     else:
                         sample.reward = rewards[i]
-                    
+
             if dynamic_filter is not None and not dynamic_filter(args, data_group[group_index]):
                 # Delete the invalid samples, don't use them in partial rollout.
                 del data_group[group_index]
                 state.remaining_batch_size -= 1
                 update_num_stats(state, "excluded", "dynamic_sampling_filter", args.n_samples_per_prompt)
                 continue
-            
+
             # add the samples to the data
             if len(data) < target_data_size:
                 data.extend(data_group[group_index])
                 del data_group[group_index]
                 pbar.update(args.n_samples_per_prompt)
-                
+
             # When having enough samples, try abort the rollout and continue
             if len(data) >= target_data_size and not have_aborted:
                 await abort_rollout()
                 have_aborted = True
-            
+
     pbar.close()
 
     print(f"[DEBUG] Rollout {rollout_id}: Got {len(data)} samples", flush=True)
@@ -329,20 +331,24 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer) -> list[Sam
             for sample in samples:
                 update_num_stats(state, "cached", sample.status)
                 cached_samples.append(sample)
-            
+
             if len(cached_samples) > 0:
                 # Add cached samples back to buffer for next iteration
                 await data_buffer.add_samples(cached_samples, rollout_info)
                 print(f"[DEBUG] Rollout {rollout_id}: Cached {len(cached_samples)} samples back to buffer", flush=True)
 
     if over_sampling_filter is not None:
-        update_num_stats(state, "excluded", "over_sampling_filter", len(data) - args.rollout_batch_size * args.n_samples_per_prompt)
+        update_num_stats(
+            state, "excluded", "over_sampling_filter", len(data) - args.rollout_batch_size * args.n_samples_per_prompt
+        )
         data = over_sampling_filter(args, data)[: args.rollout_batch_size * args.n_samples_per_prompt]
     else:
         data.sort(key=lambda sample: sample.index)
 
-    print(f"[DEBUG] Rollout {rollout_id}: {state.stats_to_string()}", flush=True) 
-    assert len(data) == args.rollout_batch_size * args.n_samples_per_prompt, f"Got {len(data)} samples, expected {args.rollout_batch_size * args.n_samples_per_prompt}"
+    print(f"[DEBUG] Rollout {rollout_id}: {state.stats_to_string()}", flush=True)
+    assert (
+        len(data) == args.rollout_batch_size * args.n_samples_per_prompt
+    ), f"Got {len(data)} samples, expected {args.rollout_batch_size * args.n_samples_per_prompt}"
     return data
 
 

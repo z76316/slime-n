@@ -239,7 +239,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                     "You could use `slime.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std` as an example."
                 ),
             )
-            
+
             # partial rollout
             parser.add_argument(
                 "--partial-rollout",
@@ -900,7 +900,7 @@ def parse_args(add_custom_arguments=None):
 
     if args.vocab_size and not args.padded_vocab_size:
         args.padded_vocab_size = _vocab_size_with_padding(args.vocab_size, args)
-    
+
     if args.partial_rollout and args.buffer_read_function_path is None:
         args.buffer_read_function_path = "slime.rollout.buffer_hub.partial_fifo.partial_pop_first"
         args.buffer_write_function_path = "slime.rollout.buffer_hub.partial_fifo.partial_push_end"

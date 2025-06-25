@@ -131,10 +131,10 @@ class Buffer:
 
         samples = await self._get_samples_from_buffer(num_samples, rollout_info)
         num_samples -= len(samples)
-        
+
         assert num_samples % self.args.n_samples_per_prompt == 0
         num_prompts = num_samples // self.args.n_samples_per_prompt
-        
+
         if num_samples == 0:
             return samples
 
@@ -178,7 +178,9 @@ class Buffer:
         """
         if not samples:
             return
-        assert len(samples) % self.args.n_samples_per_prompt == 0, f"Buffer add_samples got {len(samples)} samples, expected {self.args.n_samples_per_prompt}"
+        assert (
+            len(samples) % self.args.n_samples_per_prompt == 0
+        ), f"Buffer add_samples got {len(samples)} samples, expected {self.args.n_samples_per_prompt}"
 
         self.write_function(self.args, self.buffer, samples, rollout_info)
         print(f"Buffer size after adding samples: {len(self.buffer)} (adding {len(samples)} samples)", flush=True)
