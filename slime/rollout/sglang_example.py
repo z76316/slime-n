@@ -1,6 +1,10 @@
 import asyncio
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any, DefaultDict, Set, Counter
+from collections import defaultdict 
+import json
+from enum import Enum
 
 from tqdm import tqdm
 from transformers import AutoTokenizer
@@ -21,21 +25,22 @@ __all__ = ["generate_rollout"]
 class GenerateState:
     remaining_batch_size: int = 0 # the number of samples that are done/running/pending
     pendings: set = None # the set of pending tasks
-    input_pending_samples: int = 0
-    input_aborted_samples: int = 0
-    input_completed_samples: int = 0
-    input_truncated_samples: int = 0
-    output_aborted_samples: int = 0
-    output_completed_samples: int = 0
-    output_truncated_samples: int = 0
-    cached_pending_samples: int = 0
-    cached_aborted_samples: int = 0
-    cached_completed_samples: int = 0
-    cached_truncated_samples: int = 0
-    dynamic_filter_excluded_samples: int = 0
-    over_sampling_filter_excluded_samples: int = 0
-    def stats_to_string(self):
-        return f"Input pending samples: {self.input_pending_samples}, Input aborted samples: {self.input_aborted_samples}, Input completed samples: {self.input_completed_samples}, Input truncated samples: {self.input_truncated_samples}, Output aborted samples: {self.output_aborted_samples}, Output completed samples: {self.output_completed_samples}, Output truncated samples: {self.output_truncated_samples}, Cached pending samples: {self.cached_pending_samples}, Cached aborted samples: {self.cached_aborted_samples}, Cached completed samples: {self.cached_completed_samples}, Cached truncated samples: {self.cached_truncated_samples}, dynamic filter excluded samples: {self.dynamic_filter_excluded_samples}, Over sampling filter excluded samples: {self.over_sampling_filter_excluded_samples}"
+    num_stats: DefaultDict[str, Counter] = field(
+        default_factory=lambda: defaultdict(Counter)
+    )
+    def bump(self, group: str, value: str, n: int):
+        self.num_stats[group][value] += n
+    def stats_to_string(self) -> str:
+        flat = {
+            f"{g}_{k}_samples": v
+            for g, ctr in self.num_stats.items()
+            for k, v in ctr.items()
+        }
+        return json.dumps(flat, ensure_ascii=False)
+
+def update_num_stats(state: GenerateState, group: str, value: Any, n: int = 1):
+    vstr = value.name.lower() if isinstance(value, Enum) else str(value)
+    state.bump(group, vstr, n)
 
 TOKENIZER = None
 SEMAPHORE = None
@@ -204,37 +209,6 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer) -> list[Sam
             )
         state.remaining_batch_size += len(samples) // args.n_samples_per_prompt
 
-    def update_state(sample: Sample, is_output: bool = False, is_cached: bool = False):
-        if not is_output:
-            match sample.status:
-                case Sample.Status.PENDING:
-                    state.input_pending_samples += 1
-                case Sample.Status.ABORTED:
-                    state.input_aborted_samples += 1
-                case Sample.Status.COMPLETED:
-                    state.input_completed_samples += 1
-                case Sample.Status.TRUNCATED:
-                    state.input_truncated_samples += 1
-        else:
-            if is_cached:
-                match sample.status:
-                    case Sample.Status.PENDING:
-                        state.cached_pending_samples += 1
-                    case Sample.Status.ABORTED:
-                        state.cached_aborted_samples += 1
-                    case Sample.Status.COMPLETED:
-                        state.cached_completed_samples += 1
-                    case Sample.Status.TRUNCATED:
-                        state.cached_truncated_samples += 1
-            else:
-                match sample.status:
-                    case Sample.Status.ABORTED:
-                        state.output_aborted_samples += 1
-                    case Sample.Status.COMPLETED:
-                        state.output_completed_samples += 1
-                    case Sample.Status.TRUNCATED:
-                        state.output_truncated_samples += 1
-
     data_group = {}
     data = []
 
@@ -273,7 +247,7 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer) -> list[Sam
             samples = await data_buffer.get_samples(sampling_batch_size * args.n_samples_per_prompt, rollout_info)
             submit_generate_tasks(samples)
             for sample in samples:
-                update_state(sample, is_output=False, is_cached=False)
+                update_num_stats(state, "input", sample.status)
         
         # wait for the generation to finish
         done, state.pendings = await asyncio.wait(state.pendings, return_when=asyncio.FIRST_COMPLETED)
@@ -289,7 +263,7 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer) -> list[Sam
             data_group[group_index].append(sample)
 
             assert sample.status == Sample.Status.COMPLETED or sample.status == Sample.Status.TRUNCATED, f"Sample {sample.index} has status {sample.status}, but should be completed or truncated. Rollout {rollout_id}, Sample prompt: {sample.prompt}, Sample response: {sample.response}"
-            update_state(sample, is_output=True, is_cached=False)
+            update_num_stats(state, "output", sample.status)
 
             if not len(data_group[group_index]) == args.n_samples_per_prompt:
                 # wait for the data_group for this prompt finishing
@@ -309,7 +283,7 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer) -> list[Sam
                 # Delete the invalid samples, don't use them in partial rollout.
                 del data_group[group_index]
                 state.remaining_batch_size -= 1
-                state.dynamic_filter_excluded_samples += args.n_samples_per_prompt
+                update_num_stats(state, "excluded", "dynamic_sampling_filter", args.n_samples_per_prompt)
                 continue
             
             # add the samples to the data
@@ -339,7 +313,7 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer) -> list[Sam
             done, state.pendings = await asyncio.wait(state.pendings, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 sample = task.result()
-                update_state(sample, is_output=True, is_cached=False)
+                update_num_stats(state, "output", sample.status)
 
                 group_index = sample.index // args.n_samples_per_prompt
                 if group_index not in data_group:
@@ -353,7 +327,7 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer) -> list[Sam
             ), f"Got {len(samples)} samples, expected {args.n_samples_per_prompt}"
             cached_samples = []
             for sample in samples:
-                update_state(sample, is_output=True, is_cached=True)
+                update_num_stats(state, "cached", sample.status)
                 cached_samples.append(sample)
             
             if len(cached_samples) > 0:
@@ -362,7 +336,7 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer) -> list[Sam
                 print(f"[DEBUG] Rollout {rollout_id}: Cached {len(cached_samples)} samples back to buffer", flush=True)
 
     if over_sampling_filter is not None:
-        state.over_sampling_filter_excluded_samples += len(data) - args.rollout_batch_size * args.n_samples_per_prompt
+        update_num_stats(state, "excluded", "over_sampling_filter", len(data) - args.rollout_batch_size * args.n_samples_per_prompt)
         data = over_sampling_filter(args, data)[: args.rollout_batch_size * args.n_samples_per_prompt]
     else:
         data.sort(key=lambda sample: sample.index)
