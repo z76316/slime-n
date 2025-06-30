@@ -4,14 +4,13 @@ from typing import Any, Dict, List, Optional
 
 import aiohttp
 import requests
+import wandb
 from transformers import AutoTokenizer
 
-import wandb
 from slime.ray.buffer import Buffer
 from slime.utils.async_utils import run
 from slime.utils.mask_utils import MultiTurnLossMaskGenerator
 from slime.utils.types import Sample
-
 
 __all__ = ["generate_agent_rollout"]
 
@@ -235,12 +234,12 @@ async def generate_agent_rollout(
         print(f"start rollout id: {rollout_id}")
         START_ROLLOUT = False
 
-    data_number_to_fetch = args.rollout_batch_size * args.n_samples_per_prompt - data_buffer.get_buffer_length()
+    data_number_to_fetch = (args.rollout_batch_size - data_buffer.get_buffer_length()) * args.n_samples_per_prompt
     if data_number_to_fetch <= 0:
         print(
-            f"❕buffer length: {data_buffer.get_buffer_length()}, buffer has enough data, return {args.rollout_batch_size * args.n_samples_per_prompt} samples"
+            f"❕buffer length: {data_buffer.get_buffer_length()}, buffer has enough data, return {args.rollout_batch_size} prompts"
         )
-        return await data_buffer.get_samples(args.rollout_batch_size * args.n_samples_per_prompt)
+        return await data_buffer.get_samples(args.rollout_batch_size)
     assert (
         data_number_to_fetch % args.n_samples_per_prompt == 0
     ), "data_number_to_fetch must be a multiple of n_samples_per_prompt"
@@ -307,7 +306,7 @@ async def generate_agent_rollout(
     final_return_results = []
 
     await data_buffer.add_samples(sample_results)
-    final_return_results = await data_buffer.get_samples(args.rollout_batch_size * args.n_samples_per_prompt)
+    final_return_results = await data_buffer.get_samples(args.rollout_batch_size)
 
     return final_return_results
 

@@ -196,16 +196,16 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
 
             # sampling
             parser.add_argument(
-                "--sampling-batch-size",
+                "--over-sampling-batch-size",
                 type=int,
                 default=None,
                 help=(
                     "This defines the granularity of the sampling batch in the rollout function. "
                     "When the number of available samples falls below the target, a sampling "
-                    "operation of size sampling_batch_size will be triggered."
+                    "operation of size over_sampling_batch_size will be triggered."
                     "Regardless of whether partial rollout is used or filters are applied, "
                     "the sampling granularity is always determined by this value. "
-                    "If this value is None, rollout_batch_size will be used as the default sampling_batch_size."
+                    "If this value is None, rollout_batch_size will be used as the default over_sampling_batch_size."
                 ),
             )
             parser.add_argument(
@@ -252,33 +252,6 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 ),
             )
             parser.add_argument(
-                "--partial-rollout-min-response-length",
-                type=int,
-                default=10,
-                help=(
-                    "Minimum response length (in characters) for a sample to be considered for partial rollout recycling. "
-                    "Shorter responses will be discarded."
-                ),
-            )
-            parser.add_argument(
-                "--partial-rollout-min-tokens",
-                type=int,
-                default=5,
-                help=(
-                    "Minimum number of tokens in the response for a sample to be considered for partial rollout recycling."
-                ),
-            )
-            parser.add_argument(
-                "--partial-rollout-mix-ratio",
-                type=float,
-                default=0.3,
-                help=(
-                    "Maximum ratio of partial rollout samples to use in each batch. "
-                    "Value between 0.0 and 1.0. Default 0.3 means up to 30% partial samples."
-                ),
-            )
-
-            parser.add_argument(
                 "--custom-generate-function-path",
                 type=str,
                 default=None,
@@ -289,23 +262,13 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
             )
 
             parser.add_argument(
-                "--buffer-read-function-path",
+                "--buffer-filter-path",
                 type=str,
-                default="slime.rollout.buffer_hub.fifo.pop_first",
+                default=None,
                 help=(
                     "Path to the buffer filter function. "
                     "It should be able to select the samples in the buffer. "
-                    "The function should take a list of samples and return a list of samples."
-                ),
-            )
-            parser.add_argument(
-                "--buffer-write-function-path",
-                type=str,
-                default="slime.rollout.buffer_hub.fifo.push_end",
-                help=(
-                    "Path to the buffer write function. "
-                    "It should be able to write the samples to the buffer. "
-                    "The function should take a list of samples and write them to the buffer."
+                    "The function should take list[list[Sample]] and return list[Sample]."
                 ),
             )
             # update weight
@@ -901,9 +864,13 @@ def parse_args(add_custom_arguments=None):
     if args.vocab_size and not args.padded_vocab_size:
         args.padded_vocab_size = _vocab_size_with_padding(args.vocab_size, args)
 
-    if args.partial_rollout and args.buffer_read_function_path is None:
-        args.buffer_read_function_path = "slime.rollout.buffer_hub.partial_fifo.partial_pop_first"
-        args.buffer_write_function_path = "slime.rollout.buffer_hub.partial_fifo.partial_push_end"
+    if args.over_sampling_batch_size is None:
+        args.over_sampling_batch_size = args.rollout_batch_size
+
+    assert args.over_sampling_batch_size >= args.rollout_batch_size, (
+        f"over_sampling_batch_size {args.over_sampling_batch_size} should be greater than or equal to "
+        f"rollout_batch_size {args.rollout_batch_size}"
+    )
 
     # placeholders
     args.seq_length = 4096

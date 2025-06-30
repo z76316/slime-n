@@ -1,6 +1,8 @@
+import asyncio
 import multiprocessing
 import random
 import socket
+
 import httpx
 
 
@@ -67,16 +69,30 @@ def terminate_process(process: multiprocessing.Process, timeout: float = 1.0) ->
         process.join()
 
 
-async def post(url, payload, use_http2=False):
+async def post(url, payload, use_http2=False, max_retries=60):
     # never timeout
     timeout = httpx.Timeout(None)
-    async with httpx.AsyncClient(http1=not use_http2, http2=use_http2, timeout=timeout) as client:
-        response = await client.post(url, json=payload or {})
-        response.raise_for_status()
+    max_retries = 60
+    retry_count = 0
+    while retry_count < max_retries:
         try:
-            output = response.json()
-        except:
-            output = response.text
+            async with httpx.AsyncClient(http1=not use_http2, http2=use_http2, timeout=timeout) as client:
+                response = await client.post(url, json=payload or {})
+                response.raise_for_status()
+                try:
+                    output = response.json()
+                except:
+                    output = response.text
+        except Exception as e:
+            retry_count += 1
+            print(f"Error: {e}, retrying... (attempt {retry_count}/{max_retries})")
+            if retry_count >= max_retries:
+                print(f"Max retries ({max_retries}) reached, failing...")
+                raise e
+            await asyncio.sleep(1)
+            continue
+        break
+
     return output
 
 
