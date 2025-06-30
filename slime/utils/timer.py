@@ -1,21 +1,16 @@
-from time import time
-from functools import wraps
 from contextlib import contextmanager
+from functools import wraps
+from time import time
 
+from .misc import SingletonMeta
 
 __all__ = ["Timer", "timer"]
 
 
-class Timer:
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(Timer, cls).__new__(cls)
-            cls._instance.timers = {}
-            cls._instance.start_time = {}
-            cls._instance.seq_lens = None
-        return cls._instance
+class Timer(metaclass=SingletonMeta):
+    def __init__(self):
+        self.timers = {}
+        self.start_time = {}
 
     def start(self, name):
         assert name not in self.timers, f"Timer {name} already started."
@@ -70,6 +65,7 @@ def timer(name_or_func):
         return Timer().context(name)
 
     func = name_or_func
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         with Timer().context(func.__name__):

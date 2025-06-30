@@ -37,9 +37,9 @@
 
 1. **batch size 是如何计算的？**
 
-   一个 rollout 会用 `rollout_batch_size` 条 prompt，每一条会采 `n_samples_per_prompts` 条，所以一个 rollout 共 `rollout_batch_size * n_samples_per_prompts` 条数据。
+   一个 rollout 会用 `rollout_batch_size` 条 prompt，每一条会采 `n_samples_per_prompt` 条，所以一个 rollout 共 `rollout_batch_size * n_samples_per_prompt` 条数据。
 
-   可以用 `--num-steps-per-rollout` 来决定每一个 rollout 跑多少步。这相当于是把 `global_batch_size` 设置成 `rollout_batch_size * n_samples_per_prompts // num_steps_per_rollout`。
+   可以用 `--num-steps-per-rollout` 来决定每一个 rollout 跑多少步。这相当于是把 `global_batch_size` 设置成 `rollout_batch_size * n_samples_per_prompt // num_steps_per_rollout`。
 
 1. **slime 是否进行了 data packing / varlen 处理？**
 

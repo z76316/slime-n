@@ -37,9 +37,9 @@
 
 6.  **How is the batch size calculated?**
 
-    A single rollout uses `rollout_batch_size` prompts. For each prompt, `n_samples_per_prompts` samples are generated. Therefore, one rollout contains a total of `rollout_batch_size * n_samples_per_prompts` data entries.
+    A single rollout uses `rollout_batch_size` prompts. For each prompt, `n_samples_per_prompt` samples are generated. Therefore, one rollout contains a total of `rollout_batch_size * n_samples_per_prompt` data entries.
 
-    You can use `--num-steps-per-rollout` to determine how many steps to run per rollout. This is equivalent to setting the `global_batch_size` to `rollout_batch_size * n_samples_per_prompts // num_steps_per_rollout`.
+    You can use `--num-steps-per-rollout` to determine how many steps to run per rollout. This is equivalent to setting the `global_batch_size` to `rollout_batch_size * n_samples_per_prompt // num_steps_per_rollout`.
 
 7.  **Does slime perform data packing / variable-length (varlen) processing?**
 

@@ -351,10 +351,7 @@ In Rollout Buffer, you need to implement the key function `run_rollout()` for yo
 
 ### Filtering and Reward Configuration
 
-- **`--buffer-filter-path`**: Data buffer filter path, supports customization, defaults to using the latest batch of data in Buffer for updates
-  ```bash
-  --buffer-filter-path slime.rollout.filter_hub.buffer_filters.pop_first
-  ```
+- **`--buffer-filter-path`**: Data buffer filter path, supports customization, defaults to using the latest batch of data in Buffer for updates.
 
 - **`--disable-rewards-normalization`**: Disable reward normalization, if rewards are already normalized in Rollout Buffer, please enable this parameter
   ```bash

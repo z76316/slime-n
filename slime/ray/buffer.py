@@ -6,9 +6,9 @@ from typing import Any, Union
 
 import ray
 import torch
+import wandb
 from transformers import AutoTokenizer
 
-import wandb
 from slime.utils.data import JsonlDataset
 from slime.utils.misc import load_function
 from slime.utils.types import Sample
@@ -17,30 +17,11 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
-def convert_samples_to_train_data(samples: list[Sample]):
-    """
-    Convert inference generated samples to training data.
-    """
-    samples = sorted(samples, key=lambda x: x.index)
-    # print([item.index for item in samples][:32])
-    train_data = {
-        "tokens": [sample.tokens for sample in samples],
-        "response_lengths": [sample.response_length for sample in samples],
-        "rewards": [sample.reward for sample in samples],
-        "truncated": [1 if sample.status == Sample.Status.TRUNCATED else 0 for sample in samples],
-    }
-    if samples[0].loss_mask:
-        train_data["loss_masks"] = []
-        for sample in samples:
-            assert (
-                len(sample.loss_mask) == sample.response_length
-            ), f"loss mask length {len(sample.loss_mask)} != response length {sample.response_length}"
-            train_data["loss_masks"].append(sample.loss_mask)
-    if samples[0].metadata and "raw_reward" in samples[0].metadata:
-        train_data["raw_reward"] = [sample.metadata["raw_reward"] for sample in samples]
-    if samples[0].metadata and "round_number" in samples[0].metadata:
-        train_data["round_number"] = [sample.metadata["round_number"] for sample in samples]
-    return train_data
+def pop_first(args, rollout_id, buffer: list[list[Sample]], num_samples: int) -> list[list[Sample]]:
+    num_to_pop = min(len(buffer), num_samples)
+    samples = buffer[:num_to_pop]
+    del buffer[:num_to_pop]
+    return samples
 
 
 @ray.remote
@@ -48,9 +29,13 @@ class Buffer:
     def __init__(self, args):
         self.args = args
 
-        self.buffer = []
-        self.read_function = load_function(self.args.buffer_read_function_path)
-        self.write_function = load_function(self.args.buffer_write_function_path)
+        # a list of sample group.
+        # each group has n_samples_per_prompt samples, all of them has the same prompt.
+        self.buffer: list[list[Sample]] = []
+        if self.args.buffer_filter_path is None:
+            self.buffer_filter = pop_first
+        else:
+            self.buffer_filter = load_function(self.args.buffer_filter_path)
 
         self.train_data_pool = {}
         self.eval_data_pool = {}
@@ -124,79 +109,80 @@ class Buffer:
 
         wandb.init(**wandb_config, settings=wandb.Settings(mode="shared"))
 
-    async def get_samples(self, num_samples: int, rollout_info: dict[str, Any]) -> list[Sample]:
+    async def get_samples(self, num_samples: int) -> list[list[Sample]]:
         """
         Return num_samples samples
         """
 
-        samples = await self._get_samples_from_buffer(num_samples, rollout_info)
+        samples = await self._get_samples_from_buffer(num_samples)
         num_samples -= len(samples)
-
-        assert num_samples % self.args.n_samples_per_prompt == 0
-        num_prompts = num_samples // self.args.n_samples_per_prompt
 
         if num_samples == 0:
             return samples
 
         if self.dataset is not None:
-            if self.sample_offset + num_prompts <= len(self.dataset):
-                prompt_samples = self.dataset.samples[self.sample_offset : self.sample_offset + num_prompts]
-                self.sample_offset += num_prompts
+            if self.sample_offset + num_samples <= len(self.dataset):
+                prompt_samples = self.dataset.samples[self.sample_offset : self.sample_offset + num_samples]
+                self.sample_offset += num_samples
             else:
                 prompt_samples = self.dataset.samples[self.sample_offset :]
-                num_prompts -= len(prompt_samples)
+                num_samples -= len(prompt_samples)
                 self.epoch_id += 1
                 if self.args.rollout_shuffle:
                     self.dataset.shuffle(self.epoch_id)
-                prompt_samples += self.dataset.samples[:num_prompts]
-                self.sample_offset = num_prompts
+                prompt_samples += self.dataset.samples[:num_samples]
+                self.sample_offset = num_samples
             for prompt_sample in prompt_samples:
+                group = []
                 for _ in range(self.args.n_samples_per_prompt):
                     sample = copy.deepcopy(prompt_sample)
                     sample.index = self.sample_index
                     self.sample_index += 1
-                    samples.append(sample)
+                    group.append(sample)
+                samples.append(group)
         else:
             for _ in range(num_samples):
-                sample = Sample(
-                    index=self.sample_index,
-                )
-                self.sample_index += 1
-                samples.append(sample)
+                group = []
+                for _ in range(self.args.n_samples_per_prompt):
+                    sample = Sample(
+                        index=self.sample_index,
+                    )
+                    self.sample_index += 1
+                    group.append(sample)
+                samples.append(group)
         return samples
 
-    async def _get_samples_from_buffer(self, num_samples: int, rollout_info: dict[str, Any]) -> list[Sample]:
+    async def _get_samples_from_buffer(self, num_samples: int) -> list[list[Sample]]:
         if len(self.buffer) == 0 or num_samples == 0:
             return []
 
-        samples = self.read_function(self.args, self.buffer, num_samples, rollout_info)
+        samples = self.buffer_filter(self.args, self.rollout_id, self.buffer, num_samples)
         return samples
 
-    async def add_samples(self, samples: list[Sample], rollout_info: dict[str, Any]):
+    async def add_samples(self, samples: list[list[Sample]]):
         """
         Add a sample group to buffer.
         """
         if not samples:
             return
-        assert (
-            len(samples) % self.args.n_samples_per_prompt == 0
-        ), f"Buffer add_samples got {len(samples)} samples, expected {self.args.n_samples_per_prompt}"
 
-        self.write_function(self.args, self.buffer, samples, rollout_info)
-        print(f"Buffer size after adding samples: {len(self.buffer)} (adding {len(samples)} samples)", flush=True)
+        assert len(samples) % self.args.n_samples_per_prompt == 0
+        for i in range(0, len(samples), self.args.n_samples_per_prompt):
+            group = samples[i : i + self.args.n_samples_per_prompt]
+            self.buffer.append(group)
 
     def generate(self, rollout_id, evaluation=False):
+        self.rollout_id = rollout_id
         if not evaluation and self.args.load_debug_rollout_data:
             data = pickle.load(
                 open(self.args.load_debug_rollout_data.format(rollout_id=rollout_id), "rb"),
             )
             data = [Sample(**sample) for sample in data]
-            self.train_data_pool[rollout_id] = convert_samples_to_train_data(data)
-            return
+        else:
+            generate_rollout = self.eval_generate_rollout if evaluation else self.generate_rollout
+            data = generate_rollout(self.args, rollout_id, self, evaluation=evaluation)
 
-        generate_rollout = self.eval_generate_rollout if evaluation else self.generate_rollout
-        data = generate_rollout(self.args, rollout_id, self, evaluation=evaluation)
-        self.set_data(rollout_id, data, evaluation=evaluation)
+        self._set_data(data, evaluation=evaluation)
 
     def get_data(self, rollout_id, evaluation=False):
         data_pool = self.train_data_pool if not evaluation else self.eval_data_pool
@@ -205,16 +191,51 @@ class Buffer:
         del data_pool[rollout_id]
         return data
 
-    def set_data(self, rollout_id, data: Union[list[Sample], Any], evaluation=False):
+    def _convert_samples_to_train_data(self, samples: list[Sample]):
+        """
+        Convert inference generated samples to training data.
+        """
+
+        samples = sorted(samples, key=lambda x: x.index)
+        train_data = {
+            "tokens": [sample.tokens for sample in samples],
+            "response_lengths": [sample.response_length for sample in samples],
+            # some reward model, e.g. remote rm, may return multiple rewards,
+            # we could use key to select the reward.
+            "rewards": [
+                sample.reward if not self.args.reward_key else sample.rewards[self.args.reward_key]
+                for sample in samples
+            ],
+            "truncated": [1 if sample.status == Sample.Status.TRUNCATED else 0 for sample in samples],
+        }
+
+        if samples[0].loss_mask:
+            train_data["loss_masks"] = []
+            for sample in samples:
+                assert (
+                    len(sample.loss_mask) == sample.response_length
+                ), f"loss mask length {len(sample.loss_mask)} != response length {sample.response_length}"
+                train_data["loss_masks"].append(sample.loss_mask)
+
+        # overwriting the raw reward
+        if samples[0].metadata and "raw_reward" in samples[0].metadata:
+            train_data["raw_reward"] = [sample.metadata["raw_reward"] for sample in samples]
+
+        # For rollout buffer
+        if samples[0].metadata and "round_number" in samples[0].metadata:
+            train_data["round_number"] = [sample.metadata["round_number"] for sample in samples]
+        return train_data
+
+    def _set_data(self, data: Union[list[Sample], Any], evaluation=False):
         data_pool = self.eval_data_pool if evaluation else self.train_data_pool
         if not evaluation:
             if self.args.save_debug_rollout_data:
                 pickle.dump(
                     [sample.__dict__ for sample in data],
-                    open(self.args.save_debug_rollout_data.format(rollout_id=rollout_id), "wb"),
+                    open(self.args.save_debug_rollout_data.format(rollout_id=self.rollout_id), "wb"),
                 )
-            data = convert_samples_to_train_data(data)
-        data_pool[rollout_id] = data
+            data = self._convert_samples_to_train_data(data)
+        data_pool[self.rollout_id] = data
 
     def update_metadata(self, metadata: dict):
         self.metadata.update(metadata)

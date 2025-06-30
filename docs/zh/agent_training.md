@@ -352,10 +352,7 @@ class CustomTaskLossMaskGenerator(MultiTurnLossMaskGenerator):
 
 #### 过滤与奖励配置
 
-- **`--buffer-filter-path`**：数据缓冲区过滤器路径，支持自定义，默认采用 Buffer 中最新的一批数据进行更新
-  ```bash
-  --buffer-filter-path slime.rollout.filter_hub.buffer_filters.pop_first
-  ```
+- **`--buffer-filter-path`**：数据缓冲区过滤器路径，支持自定义，默认采用 Buffer 中最新的一批数据进行更新。
 
 - **`--disable-rewards-normalization`**：禁用奖励归一化，如果 Rollout Buffer 中已经归一化奖励，请启用此参数
   ```bash

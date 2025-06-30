@@ -42,15 +42,6 @@ ROLLOUT_ARGS=(
 
    --global-batch-size 256
    --balance-data
-   --sampling-batch-size 32
-   
-   # --partial-rollout
-   # --partial-rollout-min-response-length 20
-   # --partial-rollout-min-tokens 8
-   # --partial-rollout-mix-ratio 0.75 
-   # --over-sampling-filter-path slime.rollout.filter_hub.over_sampling_filters.sort_by_reward_std
-   # --over-sampling-filter-input-size 48
-   # --dynamic-sampling-filter-path slime.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
 )
 
 EVAL_ARGS=(

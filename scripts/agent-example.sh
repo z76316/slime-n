@@ -140,7 +140,6 @@ ray job submit --address="http://127.0.0.1:8265" \
    --agent-rollout-buffer-url http://${MASTER_ADDR}:8889 \
    --keep-old-actor \
    --update-rollout-weights-interval 1 \
-   --buffer-filter-path slime.rollout.filter_hub.buffer_filters.pop_first \
    --disable-rewards-normalization \
    --offload-rollout \
    --offload-ref \
