@@ -1,5 +1,7 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Optional
+
 import torch
 
 
@@ -13,12 +15,18 @@ class Sample:
     response: Optional[str] = None
     tokens: Optional[list[int]] = None
     response_length: Optional[int] = None
-    truncated: Optional[bool] = None
     reward: Optional[float] = None
     loss_mask: Optional[list[int]] = None
-    metadata: Optional[dict] = None
+    metadata: dict = field(default_factory=dict)
     version: int = 0
-    aborted: bool = False
+
+    class Status(Enum):
+        PENDING = "pending"
+        COMPLETED = "completed"
+        TRUNCATED = "truncated"
+        ABORTED = "aborted"
+
+    status: Status = Status.PENDING
 
 
 @dataclass

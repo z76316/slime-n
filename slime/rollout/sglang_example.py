@@ -1,6 +1,10 @@
 import asyncio
 import copy
-from dataclasses import dataclass
+import json
+from collections import defaultdict
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Counter, DefaultDict
 
 from tqdm import tqdm
 from transformers import AutoTokenizer
@@ -18,8 +22,21 @@ __all__ = ["generate_rollout"]
 
 @dataclass
 class GenerateState:
-    remaining_batch_size: int = 0
-    pendings: set = None
+    remaining_batch_size: int = 0  # the number of samples that are done/running/pending
+    pendings: set = None  # the set of pending tasks
+    num_stats: DefaultDict[str, Counter] = field(default_factory=lambda: defaultdict(Counter))
+
+    def bump(self, group: str, value: str, n: int):
+        self.num_stats[group][value] += n
+
+    def stats_to_string(self) -> str:
+        flat = {f"{g}_{k}_samples": v for g, ctr in self.num_stats.items() for k, v in ctr.items()}
+        return json.dumps(flat, ensure_ascii=False)
+
+
+def update_num_stats(state: GenerateState, group: str, value: Any, n: int = 1):
+    vstr = value.name.lower() if isinstance(value, Enum) else str(value)
+    state.bump(group, vstr, n)
 
 
 TOKENIZER = None
@@ -37,33 +54,69 @@ async def generate(args, sample: Sample, sampling_params) -> Sample:
         )
 
     url = f"http://{args.sglang_router_ip}:{args.sglang_router_port}/generate"
+
+    assert (
+        sample.status == Sample.Status.PENDING or sample.status == Sample.Status.ABORTED
+    ), f"Sample status is {sample.status}"
+    is_partial_sample = sample.status == Sample.Status.ABORTED
+    # Handle partial rollout samples: continue generation from existing response
+    if is_partial_sample:
+        # Continue generation from partial response
+        input_text = sample.prompt + sample.response
+    else:
+        # Regular generation from prompt
+        input_text = sample.prompt
+
     payload = {
-        "text": sample.prompt,
+        "text": input_text,
         "sampling_params": sampling_params,
     }
-    while True:
+
+    max_retries = 60
+    retry_count = 0
+    while retry_count < max_retries:
         try:
             async with SEMAPHORE:
                 output = await post(url, payload, use_http2=args.use_http2)
         except Exception as e:
-            print(f"Error: {e}, retrying...")
+            retry_count += 1
+            print(f"Error: {e}, retrying... (attempt {retry_count}/{max_retries})")
+            if retry_count >= max_retries:
+                print(f"Max retries ({max_retries}) reached, failing...")
+                raise e
             await asyncio.sleep(1)
             continue
         break
 
     prompt_tokens_ids = TOKENIZER(sample.prompt, add_special_tokens=False)["input_ids"]
-    response_token_ids = TOKENIZER(output["text"], add_special_tokens=False)["input_ids"]
 
+    if is_partial_sample:
+        # For partial rollout: combine existing response with new generation
+        sample.response = sample.response + output["text"]
+    else:
+        # Regular generation
+        sample.response = output["text"]
+
+    response_token_ids = TOKENIZER(sample.response, add_special_tokens=False)["input_ids"]
     sample.tokens = prompt_tokens_ids + response_token_ids
     sample.response_length = len(response_token_ids)
-    sample.truncated = output["meta_info"]["finish_reason"]["type"] == "length"
-    sample.response = output["text"]
-    sample.aborted = output["meta_info"]["finish_reason"]["type"] == "abort"
+    match output["meta_info"]["finish_reason"]["type"]:
+        case "length":
+            sample.status = Sample.Status.TRUNCATED
+        case "abort":
+            sample.status = Sample.Status.ABORTED
+        case "stop":
+            sample.status = Sample.Status.COMPLETED
 
     return sample
 
 
 async def generate_and_rm(args, sample: Sample, sampling_params: dict, evaluation=False) -> Sample:
+    # For samples with existing response, check if they're complete
+    if sample.status == Sample.Status.COMPLETED or sample.status == Sample.Status.TRUNCATED:
+        assert sample.response is not None and sample.reward is not None
+        return sample
+
     # generate
     if args.custom_generate_function_path is not None:
         custom_generate_func = load_function(args.custom_generate_function_path)
@@ -71,7 +124,7 @@ async def generate_and_rm(args, sample: Sample, sampling_params: dict, evaluatio
     else:
         sample = await generate(args, sample, sampling_params)
 
-    if sample.aborted:
+    if sample.status == Sample.Status.ABORTED:
         return sample
 
     # for the rm that need the whole group, we will not do the rm here
@@ -88,7 +141,7 @@ async def generate_and_rm(args, sample: Sample, sampling_params: dict, evaluatio
     return sample
 
 
-async def generate_rollout_async(args, rollout_id, data_buffer) -> list[Sample]:
+async def generate_rollout_async(args, rollout_id: int, data_buffer) -> list[Sample]:
     """An example to implement the generate_rollout function for an rule based rm rollout generation.
 
     Args:
@@ -97,7 +150,7 @@ async def generate_rollout_async(args, rollout_id, data_buffer) -> list[Sample]:
         data_buffer: the data buffer to store the generated samples
 
     Returns:
-        list[Sample]: a list of samples generated by the rollout
+        list[Sample]: a list of samples generated by the rollout, the length of the list is exactly the same as the `rollout_batch_size`
     """
     assert args.rollout_global_dataset
 
@@ -113,21 +166,36 @@ async def generate_rollout_async(args, rollout_id, data_buffer) -> list[Sample]:
         spaces_between_special_tokens=False,
     )
 
-    # if over_sampling is set, the sampling batch size can be larger than
-    # the required rollout batch size
-    sampling_batch_size = (
-        args.over_sampling_batch_size if args.over_sampling_batch_size is not None else args.rollout_batch_size
-    )
-    # get data from the global_dataset
-    samples = await data_buffer.get_samples(sampling_batch_size * args.n_samples_per_prompt)
+    # sampling_batch_size refers to the number of samples to get at a time.
+    # if the number of valid samples obtained is insufficient to support rollout, start the next round of sampling.
+    # redundant samples: aborted samples and excess completed and truncated samples.
+    # for non-partial rollout with dynamic filter, on-policy is required and all redundant samples are dropped, so the sampling_batch_size should not be too large.
+    # for partial rollout, redundant samples are stored in the buffer and will be used in the next round of sampling.
+
+    if args.sampling_batch_size is not None:
+        sampling_batch_size = args.sampling_batch_size
+    else:
+        sampling_batch_size = args.rollout_batch_size
 
     state = GenerateState(
         remaining_batch_size=0,
         pendings=set(),
     )
 
-    def submit_generate_tasks(samples):
+    dynamic_filter = None
+    if args.dynamic_sampling_filter_path is not None:
+        # dynamic filter is used to filter out samples that is not suitable for training
+        dynamic_filter = load_function(args.dynamic_sampling_filter_path)
+    over_sampling_filter = None
+    if args.over_sampling_filter_path is not None:
+        assert args.over_sampling_filter_input_size is not None
+        # over sampling filter ensures over_sampling_filter_input_size samples are rollout. And pick rollout_batch_size samples from them.
+        over_sampling_filter = load_function(args.over_sampling_filter_path)
+
+    def submit_generate_tasks(samples: list[Sample]):
         for sample in samples:
+            if sample.status == Sample.Status.PENDING:
+                assert len(sample.metadata) == 0, f"Sample {sample} has metadata {sample.metadata}"
             state.pendings.add(
                 asyncio.create_task(
                     generate_and_rm(
@@ -140,28 +208,48 @@ async def generate_rollout_async(args, rollout_id, data_buffer) -> list[Sample]:
             )
         state.remaining_batch_size += len(samples) // args.n_samples_per_prompt
 
-    # submit the generation requests.
-    submit_generate_tasks(samples)
-
-    do_dynamic_sampling = args.over_sampling_batch_size and args.dynamic_sampling_filter_path is not None
-    # load multiple time, so the filter should have no side effect, which should be rational?
-    if do_dynamic_sampling:
-        assert args.dynamic_sampling_filter_path is not None
-        dynamic_sampling_filter = load_function(args.dynamic_sampling_filter_path)
-    elif args.over_sampling_batch_size is not None:
-        assert args.over_sampling_filter_path is not None
-        over_sampling_filter = load_function(args.over_sampling_filter_path)
-
     data_group = {}
     data = []
-    do_print = True
 
-    # when doing dynamic sampling, we will use the first rollout_batch_size samples.
+    async def abort_rollout():
+        print(f"DEBUG: Sending abort. Current data: {len(data)}, pending tasks: {len(state.pendings)}", flush=True)
+        try:
+            response = await get(
+                f"http://{args.sglang_router_ip}:{args.sglang_router_port}/list_workers", use_http2=args.use_http2
+            )
+            print(f"DEBUG: List workers: {response}", flush=True)
+        except Exception as e:
+            print(f"Error: {e}, Failed to get list_workers", flush=True)
+            return []
+
+        for url in response["urls"]:
+            # abort all the requests
+            # NOTE: Using empty string as rid to abort ALL requests by startswith() match
+            print(f"Abort request for {url}", flush=True)
+            await post(f"{url}/abort_request", {"rid": ""}, use_http2=False)
+
+    have_aborted = False
+
+    # target_data_size is the total number of valid samples to get
+    # if over_sampling_filter_input_size is set, we will use it as the target data size, otherwise, we will use the rollout_batch_size
     target_data_size = (
-        args.rollout_batch_size if do_dynamic_sampling else sampling_batch_size
+        args.over_sampling_filter_input_size if over_sampling_filter is not None else args.rollout_batch_size
     ) * args.n_samples_per_prompt
+    # rollout_info is used for sending info to the buffer
+    rollout_info = {
+        "rollout_id": rollout_id,
+    }
+
     pbar = tqdm(total=target_data_size, desc="Rollout generation")
     while len(data) < target_data_size:
+        while state.remaining_batch_size < target_data_size // args.n_samples_per_prompt:
+            # get samples from the buffer and submit the generation requests.
+            samples = await data_buffer.get_samples(sampling_batch_size * args.n_samples_per_prompt, rollout_info)
+            submit_generate_tasks(samples)
+            for sample in samples:
+                update_num_stats(state, "input", sample.status)
+
+        # wait for the generation to finish
         done, state.pendings = await asyncio.wait(state.pendings, return_when=asyncio.FIRST_COMPLETED)
         # Always finish all done tasks. This will make the code of partial rollout cleaner.
         # The assumption here is that group_rm is not too slow.
@@ -174,9 +262,10 @@ async def generate_rollout_async(args, rollout_id, data_buffer) -> list[Sample]:
                 data_group[group_index] = []
             data_group[group_index].append(sample)
 
-            if do_print:
-                print([sample.prompt + sample.response], flush=True)
-                do_print = False
+            assert (
+                sample.status == Sample.Status.COMPLETED or sample.status == Sample.Status.TRUNCATED
+            ), f"Sample {sample.index} has status {sample.status}, but should be completed or truncated. Rollout {rollout_id}, Sample prompt: {sample.prompt}, Sample response: {sample.response}"
+            update_num_stats(state, "output", sample.status)
 
             if not len(data_group[group_index]) == args.n_samples_per_prompt:
                 # wait for the data_group for this prompt finishing
@@ -192,67 +281,74 @@ async def generate_rollout_async(args, rollout_id, data_buffer) -> list[Sample]:
                     else:
                         sample.reward = rewards[i]
 
-            if do_dynamic_sampling:
-                # the group is ready
-                if dynamic_sampling_filter(args, data_group[group_index]):
-                    # When having enough samples, don't add to data.
-                    if len(data) == target_data_size:
-                        continue
-                    data.extend(data_group[group_index])
-                    del data_group[group_index]
-                    pbar.update(args.n_samples_per_prompt)
-                else:
-                    # Delete the invalid samples, don't use them in partial rollout.
-                    del data_group[group_index]
-                    state.remaining_batch_size -= 1
-                    if state.remaining_batch_size < args.rollout_batch_size:
-                        print(
-                            f"Remaining batch size not enough, add {sampling_batch_size} prompts, "
-                            f"sample response: {[sample.prompt + sample.response]}"
-                        )
-                        new_samples = await data_buffer.get_samples(sampling_batch_size * args.n_samples_per_prompt)
-                        submit_generate_tasks(new_samples)
-            else:
-                # if not dynamic sampling, we will just add the samples to the data
-                data.extend(data_group[group_index])
-                pbar.update(args.n_samples_per_prompt)
+            if dynamic_filter is not None and not dynamic_filter(args, data_group[group_index]):
+                # Delete the invalid samples, don't use them in partial rollout.
                 del data_group[group_index]
+                state.remaining_batch_size -= 1
+                update_num_stats(state, "excluded", "dynamic_sampling_filter", args.n_samples_per_prompt)
+                continue
+
+            # add the samples to the data
+            if len(data) < target_data_size:
+                data.extend(data_group[group_index])
+                del data_group[group_index]
+                pbar.update(args.n_samples_per_prompt)
+
+            # When having enough samples, try abort the rollout and continue
+            if len(data) >= target_data_size and not have_aborted:
+                await abort_rollout()
+                have_aborted = True
+
     pbar.close()
 
-    print(f"Got {len(data)} samples, sample response: {[sample.prompt + sample.response]}")
+    print(f"[DEBUG] Rollout {rollout_id}: Got {len(data)} samples", flush=True)
 
-    if do_dynamic_sampling:
-        response = await get(
-            f"http://{args.sglang_router_ip}:{args.sglang_router_port}/list_workers", use_http2=args.use_http2
-        )
-        for url in response["urls"]:
-            # abort all the requests
-            print(f"Abort request for {url}")
-            await post(f"{url}/abort_request", {"rid": ""}, use_http2=False)
+    # there are still some unfinished requests, abort them
+    if state.pendings:
+        if not have_aborted:
+            await abort_rollout()
+            have_aborted = True
 
+    if args.partial_rollout:
+        # put unfinished samples to data group
         while state.pendings:
             done, state.pendings = await asyncio.wait(state.pendings, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 sample = task.result()
+                update_num_stats(state, "output", sample.status)
+
                 group_index = sample.index // args.n_samples_per_prompt
                 if group_index not in data_group:
                     data_group[group_index] = []
                 data_group[group_index].append(sample)
 
-    for group_index, samples in data_group.items():
-        assert (
-            len(samples) == args.n_samples_per_prompt
-        ), f"Got {len(samples)} samples, expected {args.n_samples_per_prompt}"
-        if args.partial_rollout:
-            data_buffer.add_samples(samples)
+        # try cache unfinished samples and excess valid samples back to buffer
+        for group_index, samples in data_group.items():
+            assert (
+                len(samples) == args.n_samples_per_prompt
+            ), f"Got {len(samples)} samples, expected {args.n_samples_per_prompt}"
+            cached_samples = []
+            for sample in samples:
+                update_num_stats(state, "cached", sample.status)
+                cached_samples.append(sample)
 
-    assert len(data) == target_data_size, f"Got {len(data)} samples, expected {target_data_size}"
+            if len(cached_samples) > 0:
+                # Add cached samples back to buffer for next iteration
+                await data_buffer.add_samples(cached_samples, rollout_info)
+                print(f"[DEBUG] Rollout {rollout_id}: Cached {len(cached_samples)} samples back to buffer", flush=True)
 
-    if not do_dynamic_sampling and args.over_sampling_batch_size is not None:
+    if over_sampling_filter is not None:
+        update_num_stats(
+            state, "excluded", "over_sampling_filter", len(data) - args.rollout_batch_size * args.n_samples_per_prompt
+        )
         data = over_sampling_filter(args, data)[: args.rollout_batch_size * args.n_samples_per_prompt]
     else:
         data.sort(key=lambda sample: sample.index)
 
+    print(f"[DEBUG] Rollout {rollout_id}: {state.stats_to_string()}", flush=True)
+    assert (
+        len(data) == args.rollout_batch_size * args.n_samples_per_prompt
+    ), f"Got {len(data)} samples, expected {args.rollout_batch_size * args.n_samples_per_prompt}"
     return data
 
 
@@ -344,7 +440,7 @@ async def eval_rollout_single_dataset(args, rollout_id, name, path):
     return {
         name: {
             "rewards": [sample.reward for sample in data],
-            "truncated": [sample.truncated for sample in data],
+            "truncated": [sample.status == Sample.Status.TRUNCATED for sample in data],
         }
     }
 

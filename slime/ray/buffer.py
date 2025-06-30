@@ -27,7 +27,7 @@ def convert_samples_to_train_data(samples: list[Sample]):
         "tokens": [sample.tokens for sample in samples],
         "response_lengths": [sample.response_length for sample in samples],
         "rewards": [sample.reward for sample in samples],
-        "truncated": [1 if sample.truncated else 0 for sample in samples],
+        "truncated": [1 if sample.status == Sample.Status.TRUNCATED else 0 for sample in samples],
     }
     if samples[0].loss_mask:
         train_data["loss_masks"] = []
@@ -49,7 +49,8 @@ class Buffer:
         self.args = args
 
         self.buffer = []
-        self.buffer_filter = load_function(self.args.buffer_filter_path)
+        self.read_function = load_function(self.args.buffer_read_function_path)
+        self.write_function = load_function(self.args.buffer_write_function_path)
 
         self.train_data_pool = {}
         self.eval_data_pool = {}
@@ -123,13 +124,14 @@ class Buffer:
 
         wandb.init(**wandb_config, settings=wandb.Settings(mode="shared"))
 
-    async def get_samples(self, num_samples) -> list[Sample]:
+    async def get_samples(self, num_samples: int, rollout_info: dict[str, Any]) -> list[Sample]:
         """
         Return num_samples samples
         """
 
-        samples = await self._get_samples_from_buffer(num_samples)
+        samples = await self._get_samples_from_buffer(num_samples, rollout_info)
         num_samples -= len(samples)
+
         assert num_samples % self.args.n_samples_per_prompt == 0
         num_prompts = num_samples // self.args.n_samples_per_prompt
 
@@ -161,20 +163,27 @@ class Buffer:
                 )
                 self.sample_index += 1
                 samples.append(sample)
-
-        assert len(samples) == num_samples
         return samples
 
-    async def _get_samples_from_buffer(self, num_samples) -> list[Sample]:
+    async def _get_samples_from_buffer(self, num_samples: int, rollout_info: dict[str, Any]) -> list[Sample]:
         if len(self.buffer) == 0 or num_samples == 0:
             return []
-        samples = self.buffer_filter(self.buffer, num_samples)
+
+        samples = self.read_function(self.args, self.buffer, num_samples, rollout_info)
         return samples
 
-    async def add_samples(self, samples: list[Sample]):
-        # TODO: we can save some partial rollout data here.
-        assert len(samples) % self.args.n_samples_per_prompt == 0
-        self.buffer.extend(samples)
+    async def add_samples(self, samples: list[Sample], rollout_info: dict[str, Any]):
+        """
+        Add a sample group to buffer.
+        """
+        if not samples:
+            return
+        assert (
+            len(samples) % self.args.n_samples_per_prompt == 0
+        ), f"Buffer add_samples got {len(samples)} samples, expected {self.args.n_samples_per_prompt}"
+
+        self.write_function(self.args, self.buffer, samples, rollout_info)
+        print(f"Buffer size after adding samples: {len(self.buffer)} (adding {len(samples)} samples)", flush=True)
 
     def generate(self, rollout_id, evaluation=False):
         if not evaluation and self.args.load_debug_rollout_data:
