@@ -170,6 +170,10 @@ For complete usage instructions, please refer to the [Usage Documentation](docs/
 
   - For debugging tips, please refer to the [Debugging Guide](docs/en/debug.md)
 
+## Hardware Support
+- Nvidia: refer to this repo README
+- AMD: refer to the [toturial](docs/en/amd_toturial.md)
+
 ## FAQ & Acknowledgements
 
   - For frequently asked questions, please see the [Q\&A](docs/en/qa.md)

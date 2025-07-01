@@ -216,11 +216,11 @@ WORKDIR /workspace/
 #########################################
 #### Install megatron-core###############
 #########################################
-RUN pip uninstall -y megatron-core && \
-    git clone https://github.com/yushengsu-thu/Megatron-LM-amd_version.git && \
-    cd Megatron-LM-amd_version && \
-    pip install -vvv -e . && \
-    cd /workspace/
+RUN pip uninstall -y megatron-core
+COPY Megatron-LM-amd_version /workspace/Megatron-LM-amd_version/
+WORKDIR /workspace/Megatron-LM-amd_version
+RUN pip install -vvv -e .
+WORKDIR /workspace/
 #########################################
 #########################################
 #########################################
