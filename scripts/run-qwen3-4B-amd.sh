@@ -183,7 +183,7 @@ MEGATRON_LM_PATH=$(pip list | grep megatron-core | awk '{print $NF}')
 ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json='{
      "env_vars": {
-        "PYTHONPATH": "'$MEGATRON_LM_PATH'",
+        "PYTHONPATH": "/workspace/Megatron-LM-amd_version/",
         "CUDA_DEVICE_MAX_CONNECTIONS": "1"
      }
    }' \
