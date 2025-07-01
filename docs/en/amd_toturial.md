@@ -1,16 +1,18 @@
 # AMD Toturial
 
+⚠️ If you encounter problems on AMD instinct, feel free to reach out [Yusheng Su](https://yushengsu-thu.github.io/). 
+
+
 ## Introduction
 
 If you are running Slime on AMD's Instinct, please refer to the following materials. This tutorial will explain how to set up the development environment (Docker), use the modified AMD dependencies, and provide an example for running the experiments. The current rocm docker only support AMD's MI300.
 
-⚠️ Note: Feel free to reach out [Yusheng Su](https://yushengsu-thu.github.io/), if you encounter problems on AMD instinct. 
 
 <!-- First, you need to configure the Slime runtime environment according to the [Readme](../../README.md) documentation and cd to the Slime project directory. -->
 
 ## Docker
 
-You can download the prebuilt image from DockerHub: [yushengsuthu/slime-amd](). 
+You can download the prebuilt image from DockerHub: [AMD Docker](https://hub.docker.com/r/yushengsuthu/slime-amd/tags). 
 ```bash
 docker pull yushengsuthu/slime-amd:slime_ubuntu22.04_rocm6.3.4-patch-numa_vllm0.8.5-patch_sglang0.4.7_megatron-core-patch_ray0.47-patch
 ```
@@ -24,7 +26,7 @@ docker build -f Dockerfile.rocm -t slime_ubuntu22.04_rocm6.3.4-patch-numa_vllm0.
 
 ### Environment Setup
 
-Based on the [yushengsuthu/slime-amd]() image (pre-installed with SGLang 0.4.7 and Megatron):
+Based on the [AMD Docker](https://hub.docker.com/r/yushengsuthu/slime-amd/tags) image (pre-installed with SGLang 0.4.7 and Megatron):
 ```bash
 docker run --rm -it \
   --device /dev/dri \
@@ -78,11 +80,13 @@ PYTHONPATH=${MEGATRON_LM_PATH} python tools/convert_hf_to_torch_dist.py \
 We provide examples to use [Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B), please refer to:
 - [Example: Qwen3-4B Model](scripts/run-qwen3-4B-amd.sh): Just run `scripts/run-qwen3-4B-amd.sh` 
 
-
-We show the training script below. 
 ⚠️ TODO: The [AMD-version torch_memory_saver](https://github.com/YangWang92/torch_memory_saver_numa/tree/numa) does not seem to clear memory properly; thus, we set `--sglang-mem-fraction-static` as `0.4` currently. We will continue investigating and focus on ROCm's virtual memory management for further modifications.
+
 ⚠️ TODO: ROCM seems to not support `apex` yet. Thus, we need to disable `--no-gradient-accumulation-fusion` currently. We will continue investigating how to enable this. 
+
 ⚠️ Note: The main difference between AMD's training script and NVIDIA's script is that you need to set `RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES` for ray to function properly on AMD GPUs.
+
+- We show the training script below: 
 
 ```bash
 #!/bin/bash
