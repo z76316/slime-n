@@ -17,6 +17,7 @@ from megatron.core.utils import get_model_config
 from megatron.training.global_vars import get_args
 from megatron.training.training import get_model
 
+
 from .checkpoint import load_checkpoint, save_checkpoint
 from .data import get_batch, set_local_storage
 from .loss import get_log_probs_and_entropy, policy_loss_func

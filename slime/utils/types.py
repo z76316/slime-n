@@ -1,5 +1,7 @@
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Optional, Union
+
 import torch
 
 
@@ -8,17 +10,24 @@ class Sample:
     """The sample generated"""
 
     index: Optional[int] = None
-    prompt: Optional[str] = None
+    # prompt
+    prompt: str = ""
+    tokens: list[int] = field(default_factory=list)
+    # response
+    response: str = ""
+    response_length: int = 0
     label: Optional[str] = None
-    response: Optional[str] = None
-    tokens: Optional[list[int]] = None
-    response_length: Optional[int] = None
-    truncated: Optional[bool] = None
-    reward: Optional[float] = None
+    reward: Optional[Union[float, dict[str, float]]] = None
     loss_mask: Optional[list[int]] = None
-    metadata: Optional[dict] = None
-    version: int = 0
-    aborted: bool = False
+
+    class Status(Enum):
+        PENDING = "pending"
+        COMPLETED = "completed"
+        TRUNCATED = "truncated"
+        ABORTED = "aborted"
+
+    status: Status = Status.PENDING
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass

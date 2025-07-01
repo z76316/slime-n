@@ -1,6 +1,5 @@
 import asyncio
 import copy
-from dataclasses import dataclass
 
 from tqdm import tqdm
 from transformers import AutoTokenizer
@@ -8,7 +7,7 @@ from transformers import AutoTokenizer
 from slime.utils.async_utils import run
 from slime.utils.data import JsonlDataset
 from slime.utils.http_utils import get, post
-from slime.utils.misc import load_function
+from slime.utils.misc import SingletonMeta, load_function
 from slime.utils.types import Sample
 
 from .rm_hub import async_rm, batched_async_rm
@@ -16,62 +15,112 @@ from .rm_hub import async_rm, batched_async_rm
 __all__ = ["generate_rollout"]
 
 
-@dataclass
-class GenerateState:
-    remaining_batch_size: int = 0
-    pendings: set = None
+class GenerateState(metaclass=SingletonMeta):
+    """
+    The global state for the generation process.
+    """
 
+    def __init__(self, args):
+        # persistant state for the generation process
+        self.args = args
+        self.tokenizer = AutoTokenizer.from_pretrained(args.hf_checkpoint, trust_remote_code=True)
+        self.semaphore = asyncio.Semaphore(
+            args.sglang_server_concurrency * args.rollout_num_gpus // args.rollout_num_gpus_per_engine
+        )
+        self.sampling_params = dict(
+            temperature=args.rollout_temperature,
+            top_p=args.rollout_top_p,
+            top_k=args.rollout_top_k,
+            max_new_tokens=args.rollout_max_response_len,
+            stop=args.rollout_stop,
+            stop_token_ids=args.rollout_stop_token_ids,
+            skip_special_tokens=args.rollout_skip_special_tokens,
+            no_stop_trim=True,
+            spaces_between_special_tokens=False,
+        )
+        self.reset()
 
-TOKENIZER = None
-SEMAPHORE = None
+    def reset(self):
+        self.remaining_batch_size = 0
+        self.pendings = set()
+        self.aborted = False
+
+    def submit_generate_tasks(self, samples: list[list[Sample]]):
+        for group in samples:
+            self.pendings.add(
+                asyncio.create_task(
+                    # submit a group of samples as a single task.
+                    generate_and_rm_group(
+                        self.args,
+                        group,
+                        sampling_params=self.sampling_params.copy(),
+                        evaluation=False,
+                    )
+                )
+            )
+        self.remaining_batch_size += len(samples)
 
 
 async def generate(args, sample: Sample, sampling_params) -> Sample:
-    global TOKENIZER, SEMAPHORE
-    if TOKENIZER is None:
-        TOKENIZER = AutoTokenizer.from_pretrained(args.hf_checkpoint, trust_remote_code=True)
-
-    if SEMAPHORE is None:
-        SEMAPHORE = asyncio.Semaphore(
-            args.sglang_server_concurrency * args.rollout_num_gpus // args.rollout_num_gpus_per_engine
-        )
+    state = GenerateState(args)
 
     url = f"http://{args.sglang_router_ip}:{args.sglang_router_port}/generate"
+
+    assert (
+        sample.status == Sample.Status.PENDING or sample.status == Sample.Status.ABORTED
+    ), f"Sample status is {sample.status}"
+
+    # Handle partial rollout samples: continue generation from existing response
+    input_text = sample.prompt + sample.response
+
     payload = {
-        "text": sample.prompt,
+        "text": input_text,
         "sampling_params": sampling_params,
     }
-    while True:
-        try:
-            async with SEMAPHORE:
-                output = await post(url, payload, use_http2=args.use_http2)
-        except Exception as e:
-            print(f"Error: {e}, retrying...")
-            await asyncio.sleep(1)
-            continue
-        break
 
-    prompt_tokens_ids = TOKENIZER(sample.prompt, add_special_tokens=False)["input_ids"]
-    response_token_ids = TOKENIZER(output["text"], add_special_tokens=False)["input_ids"]
+    output = await post(url, payload, use_http2=args.use_http2)
+    sample.response += output["text"]
 
+    if output["meta_info"]["finish_reason"]["type"] == "abort":
+        sample.status = Sample.Status.ABORTED
+        return sample
+
+    prompt_tokens_ids = state.tokenizer(sample.prompt, add_special_tokens=False)["input_ids"]
+    response_token_ids = state.tokenizer(sample.response, add_special_tokens=False)["input_ids"]
     sample.tokens = prompt_tokens_ids + response_token_ids
     sample.response_length = len(response_token_ids)
-    sample.truncated = output["meta_info"]["finish_reason"]["type"] == "length"
-    sample.response = output["text"]
-    sample.aborted = output["meta_info"]["finish_reason"]["type"] == "abort"
+    match output["meta_info"]["finish_reason"]["type"]:
+        case "length":
+            sample.status = Sample.Status.TRUNCATED
+        case "abort":
+            sample.status = Sample.Status.ABORTED
+        case "stop":
+            sample.status = Sample.Status.COMPLETED
 
     return sample
 
 
 async def generate_and_rm(args, sample: Sample, sampling_params: dict, evaluation=False) -> Sample:
-    # generate
-    if args.custom_generate_function_path is not None:
-        custom_generate_func = load_function(args.custom_generate_function_path)
-        sample = await custom_generate_func(args, sample, sampling_params)
-    else:
-        sample = await generate(args, sample, sampling_params)
+    # For samples with existing response, check if they're complete
+    if sample.status == Sample.Status.COMPLETED or sample.status == Sample.Status.TRUNCATED:
+        assert sample.response and sample.reward is not None
+        return sample
 
-    if sample.aborted:
+    state = GenerateState(args)
+
+    # generate
+    async with state.semaphore:
+        if state.aborted:
+            sample.status = Sample.Status.ABORTED
+            return sample
+
+        if args.custom_generate_function_path is not None:
+            custom_generate_func = load_function(args.custom_generate_function_path)
+            sample = await custom_generate_func(args, sample, sampling_params)
+        else:
+            sample = await generate(args, sample, sampling_params)
+
+    if sample.status == Sample.Status.ABORTED:
         return sample
 
     # for the rm that need the whole group, we will not do the rm here
@@ -88,7 +137,60 @@ async def generate_and_rm(args, sample: Sample, sampling_params: dict, evaluatio
     return sample
 
 
-async def generate_rollout_async(args, rollout_id, data_buffer) -> list[Sample]:
+async def generate_and_rm_group(args, group: list[Sample], sampling_params: dict, evaluation=False) -> list[Sample]:
+    state = GenerateState(args)
+
+    if state.aborted:
+        return group
+
+    group = await asyncio.gather(
+        *[generate_and_rm(args, sample, sampling_params, evaluation=evaluation) for sample in group]
+    )
+
+    # for the rm that need the whole group, we will not do the rm here
+    if not state.aborted and args.group_rm:
+        rewards = await batched_async_rm(args, group)
+        for sample, reward in zip(group, rewards):
+            sample.reward = reward
+
+    return group
+
+
+async def abort(args, rollout_id: int, data_buffer):
+    state = GenerateState(args)
+    assert not state.aborted
+    state.aborted = True
+    response = await get(
+        f"http://{args.sglang_router_ip}:{args.sglang_router_port}/list_workers", use_http2=args.use_http2
+    )
+
+    # abort all the requests
+    for url in response["urls"]:
+        print(f"Abort request for {url}", flush=True)
+        await post(f"{url}/abort_request", {"rid": ""}, use_http2=False)
+
+    # make sure all the pending tasks are finished
+    count = 0
+    while state.pendings:
+        done, state.pendings = await asyncio.wait(state.pendings, return_when=asyncio.FIRST_COMPLETED)
+
+        if not args.partial_rollout:
+            continue
+
+        # for partial rollout, collect the partial samples into the data buffer
+        for task in done:
+            group = task.result()
+            for sample in group:
+                if sample.response and "start_rollout_id" not in sample.metadata:
+                    sample.metadata["start_rollout_id"] = rollout_id
+            await data_buffer.add_samples(group)
+            count += len(group)
+
+    if args.partial_rollout:
+        print(f"Collected {count} partial samples into the data buffer", flush=True)
+
+
+async def generate_rollout_async(args, rollout_id: int, data_buffer) -> list[Sample]:
     """An example to implement the generate_rollout function for an rule based rm rollout generation.
 
     Args:
@@ -97,162 +199,71 @@ async def generate_rollout_async(args, rollout_id, data_buffer) -> list[Sample]:
         data_buffer: the data buffer to store the generated samples
 
     Returns:
-        list[Sample]: a list of samples generated by the rollout
+        list[Sample]: a list of samples generated by the rollout, the length of the list is exactly the same as the `rollout_batch_size`
     """
     assert args.rollout_global_dataset
 
-    sampling_params = dict(
-        temperature=args.rollout_temperature,
-        top_p=args.rollout_top_p,
-        top_k=args.rollout_top_k,
-        max_new_tokens=args.rollout_max_response_len,
-        stop=args.rollout_stop,
-        stop_token_ids=args.rollout_stop_token_ids,
-        skip_special_tokens=args.rollout_skip_special_tokens,
-        no_stop_trim=True,
-        spaces_between_special_tokens=False,
+    state = GenerateState(args)
+
+    # instantiate data filters
+    dynamic_filter = (
+        load_function(args.dynamic_sampling_filter_path) if args.dynamic_sampling_filter_path is not None else None
+    )
+    over_sampling_filter = (
+        load_function(args.over_sampling_filter_path) if args.over_sampling_filter_path is not None else None
     )
 
-    # if over_sampling is set, the sampling batch size can be larger than
-    # the required rollout batch size
-    sampling_batch_size = (
-        args.over_sampling_batch_size if args.over_sampling_batch_size is not None else args.rollout_batch_size
-    )
-    # get data from the global_dataset
-    samples = await data_buffer.get_samples(sampling_batch_size * args.n_samples_per_prompt)
+    # target_data_size is the total number of valid samples to get
+    target_data_size = args.over_sampling_batch_size if over_sampling_filter is not None else args.rollout_batch_size
 
-    state = GenerateState(
-        remaining_batch_size=0,
-        pendings=set(),
-    )
-
-    def submit_generate_tasks(samples):
-        for sample in samples:
-            state.pendings.add(
-                asyncio.create_task(
-                    generate_and_rm(
-                        args,
-                        sample,
-                        sampling_params=sampling_params,
-                        evaluation=False,
-                    )
-                )
-            )
-        state.remaining_batch_size += len(samples) // args.n_samples_per_prompt
-
-    # submit the generation requests.
-    submit_generate_tasks(samples)
-
-    do_dynamic_sampling = args.over_sampling_batch_size and args.dynamic_sampling_filter_path is not None
-    # load multiple time, so the filter should have no side effect, which should be rational?
-    if do_dynamic_sampling:
-        assert args.dynamic_sampling_filter_path is not None
-        dynamic_sampling_filter = load_function(args.dynamic_sampling_filter_path)
-    elif args.over_sampling_batch_size is not None:
-        assert args.over_sampling_filter_path is not None
-        over_sampling_filter = load_function(args.over_sampling_filter_path)
-
-    data_group = {}
     data = []
     do_print = True
-
-    # when doing dynamic sampling, we will use the first rollout_batch_size samples.
-    target_data_size = (
-        args.rollout_batch_size if do_dynamic_sampling else sampling_batch_size
-    ) * args.n_samples_per_prompt
-    pbar = tqdm(total=target_data_size, desc="Rollout generation")
+    pbar = tqdm(total=target_data_size * args.n_samples_per_prompt, desc="Rollout generation")
     while len(data) < target_data_size:
-        done, state.pendings = await asyncio.wait(state.pendings, return_when=asyncio.FIRST_COMPLETED)
-        # Always finish all done tasks. This will make the code of partial rollout cleaner.
-        # The assumption here is that group_rm is not too slow.
-        for task in done:
-            sample = task.result()
+        while state.remaining_batch_size < target_data_size:
+            # get samples from the buffer and submit the generation requests.
+            samples = await data_buffer.get_samples(args.over_sampling_batch_size)
+            state.submit_generate_tasks(samples)
 
-            # add sample to its group
-            group_index = sample.index // args.n_samples_per_prompt
-            if group_index not in data_group:
-                data_group[group_index] = []
-            data_group[group_index].append(sample)
+        # wait for the generation to finish
+        done, state.pendings = await asyncio.wait(state.pendings, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            group: list[Sample] = task.result()
 
             if do_print:
-                print([sample.prompt + sample.response], flush=True)
+                print(
+                    f"First rollout sample: {[group[0].prompt + group[0].response]}, reward: {group[0].reward}",
+                    flush=True,
+                )
                 do_print = False
 
-            if not len(data_group[group_index]) == args.n_samples_per_prompt:
-                # wait for the data_group for this prompt finishing
+            assert len(group) == args.n_samples_per_prompt
+            if dynamic_filter is not None and not dynamic_filter(args, group):
+                state.remaining_batch_size -= 1
                 continue
 
-            # For some rm, we need to do the rm for all samples in the group at the same time
-            if args.group_rm:
-                # TODO: this will stuck the asyncio loop.
-                rewards = await batched_async_rm(args, data_group[group_index])
-                for i, sample in enumerate(data_group[group_index]):
-                    if args.reward_key:
-                        sample.reward = rewards[i][args.reward_key]
-                    else:
-                        sample.reward = rewards[i]
-
-            if do_dynamic_sampling:
-                # the group is ready
-                if dynamic_sampling_filter(args, data_group[group_index]):
-                    # When having enough samples, don't add to data.
-                    if len(data) == target_data_size:
-                        continue
-                    data.extend(data_group[group_index])
-                    del data_group[group_index]
-                    pbar.update(args.n_samples_per_prompt)
-                else:
-                    # Delete the invalid samples, don't use them in partial rollout.
-                    del data_group[group_index]
-                    state.remaining_batch_size -= 1
-                    if state.remaining_batch_size < args.rollout_batch_size:
-                        print(
-                            f"Remaining batch size not enough, add {sampling_batch_size} prompts, "
-                            f"sample response: {[sample.prompt + sample.response]}"
-                        )
-                        new_samples = await data_buffer.get_samples(sampling_batch_size * args.n_samples_per_prompt)
-                        submit_generate_tasks(new_samples)
-            else:
-                # if not dynamic sampling, we will just add the samples to the data
-                data.extend(data_group[group_index])
+            # add the samples to the data
+            # NOTE: here we have not stored all the unused samples back to the data buffer.
+            if len(data) < target_data_size:
+                data.append(group)
                 pbar.update(args.n_samples_per_prompt)
-                del data_group[group_index]
+
     pbar.close()
+    print(f"Finish rollout: {[data[-1][0].prompt + data[-1][0].response]}, reward: {data[-1][0].reward}", flush=True)
 
-    print(f"Got {len(data)} samples, sample response: {[sample.prompt + sample.response]}")
+    # there are still some unfinished requests, abort them
+    await abort(args, rollout_id, data_buffer)
 
-    if do_dynamic_sampling:
-        response = await get(
-            f"http://{args.sglang_router_ip}:{args.sglang_router_port}/list_workers", use_http2=args.use_http2
-        )
-        for url in response["urls"]:
-            # abort all the requests
-            print(f"Abort request for {url}")
-            await post(f"{url}/abort_request", {"rid": ""}, use_http2=False)
+    if over_sampling_filter is not None:
+        data = over_sampling_filter(args, data)[: args.rollout_batch_size]
 
-        while state.pendings:
-            done, state.pendings = await asyncio.wait(state.pendings, return_when=asyncio.FIRST_COMPLETED)
-            for task in done:
-                sample = task.result()
-                group_index = sample.index // args.n_samples_per_prompt
-                if group_index not in data_group:
-                    data_group[group_index] = []
-                data_group[group_index].append(sample)
+    assert len(data) == args.rollout_batch_size, f"Got {len(data)} samples, expected {args.rollout_batch_size}"
 
-    for group_index, samples in data_group.items():
-        assert (
-            len(samples) == args.n_samples_per_prompt
-        ), f"Got {len(samples)} samples, expected {args.n_samples_per_prompt}"
-        if args.partial_rollout:
-            data_buffer.add_samples(samples)
+    # flatten the data for backward compatibility
+    data = sum(data, [])
 
-    assert len(data) == target_data_size, f"Got {len(data)} samples, expected {target_data_size}"
-
-    if not do_dynamic_sampling and args.over_sampling_batch_size is not None:
-        data = over_sampling_filter(args, data)[: args.rollout_batch_size * args.n_samples_per_prompt]
-    else:
-        data.sort(key=lambda sample: sample.index)
-
+    # reset the global state to prevent effects on the next rollout or eval.
+    state.reset()
     return data
 
 
@@ -333,7 +344,7 @@ async def eval_rollout_single_dataset(args, rollout_id, name, path):
     for coro in asyncio.as_completed(tasks):
         sample = await coro
         if do_print:
-            print([sample.prompt + sample.response], sample.reward)
+            print([sample.prompt + sample.response], sample.reward, flush=True)
             do_print = False
         data.append(sample)
         pbar.update(1)
@@ -341,10 +352,11 @@ async def eval_rollout_single_dataset(args, rollout_id, name, path):
 
     data.sort(key=lambda sample: sample.index)
 
+    reward_key = args.reward_key or args.eval_reward_key
     return {
         name: {
-            "rewards": [sample.reward for sample in data],
-            "truncated": [sample.truncated for sample in data],
+            "rewards": [sample.reward if not reward_key else sample.reward[reward_key] for sample in data],
+            "truncated": [sample.status == Sample.Status.TRUNCATED for sample in data],
         }
     }
 
