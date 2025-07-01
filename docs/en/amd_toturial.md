@@ -17,7 +17,7 @@ docker pull yushengsuthu/slime-amd:slime_ubuntu22.04_rocm6.3.4-patch-numa_vllm0.
 Or you can use the [Dockerfile.rocm](docker/Dockerfile.rocm) to build it on your side.
 ```bash
 cd docker
-docker build -f Dockerfile.rocm -t slime_ubuntu22.04_rocm6.3.4-patch-numa_vllm0.8.5-patch_sglang0.4.7_megatron-core-patch_ray0.47-patch 
+docker build -f Dockerfile.rocm -t slime_ubuntu22.04_rocm6.3.4-patch-numa_vllm0.8.5-patch_sglang0.4.7_megatron-core-patch_ray0.47-patch
 ```
 
 ## Quick Start
@@ -41,7 +41,7 @@ docker run --rm -it \
   --ulimit memlock=-1 \
   --ulimit stack=67108864 \
   -w $PWD \
-  slime_ubuntu22.04_rocm6.3.4-patch-numa_vllm0.8.5-patch_sglang0.4.7_megatron-core-patch_ray0.47-patch:latest \
+  yushengsuthu/slime-amd:slime_ubuntu22.04_rocm6.3.4-patch-numa_vllm0.8.5-patch_sglang0.4.7_megatron-core-patch_ray0.47-patch \
   /bin/bash
 ```
 
