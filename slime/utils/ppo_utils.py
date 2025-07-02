@@ -314,6 +314,7 @@ def get_reinforce_plus_plus_baseline_advantages(
     kl: List[torch.Tensor],
     loss_masks: Optional[List[torch.Tensor]],
     response_lengths: List[int],
+    kl_coef: float,
 ) -> List[torch.Tensor]:
     """
     Calculates the final advantages for the REINFORCE++-baseline algorithm.
@@ -338,7 +339,7 @@ def get_reinforce_plus_plus_baseline_advantages(
     """
     # Broadcast to get unwhitened advantages
     unwhitened_advantages = [
-        torch.ones_like(kl_tensor) * reward_val
+        torch.ones_like(kl_tensor) * reward_val - kl_coef * kl_tensor
         for kl_tensor, reward_val in zip(kl, rewards)
     ]
     # Concatenate tensors for a global operation
