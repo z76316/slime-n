@@ -8,12 +8,11 @@ import ray
 import torch
 import torch.distributed as dist
 
-### AMD Support ###
-if torch.version.hip:  # Check if using AMD/ROCm
+
+if torch.version.hip:
     from vllm.device_allocator.cumem import CuMemAllocator
-else:  # NVIDIA/CUDA
+else:
     from cumem_allocator import CuMemAllocator
-###################
 
 
 # somehow we need to import this, otherwise the update weight will stuck
