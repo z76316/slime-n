@@ -22,6 +22,9 @@ cd docker
 docker build -f Dockerfile.rocm -t slime_ubuntu22.04_rocm6.3.4-patch-numa_vllm0.8.5-patch_sglang0.4.7_megatron-core-patch_ray0.47-patch
 ```
 
+Acknowledgement: Thanks to (Yang Wang)[https://www.microsoft.com/en-us/research/people/yangwang5/] for working on the patch for this ROCm base Docker image to support virtual memory management on MI300X.
+
+
 ## Quick Start
 
 ### Environment Setup
