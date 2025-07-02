@@ -191,12 +191,15 @@ class Buffer:
         del data_pool[rollout_id]
         return data
 
-    def _convert_samples_to_train_data(self, samples: list[Sample]):
+    def _convert_samples_to_train_data(self, samples: Union[list[Sample], list[list[Sample]]]):
         """
         Convert inference generated samples to training data.
         """
-
-        samples = sorted(samples, key=lambda x: x.index)
+        if isinstance(samples[0], list):
+            samples = [sample for group in samples for sample in group]
+        else:
+            samples = sorted(samples, key=lambda x: x.index)
+        
         train_data = {
             "tokens": [sample.tokens for sample in samples],
             "response_lengths": [sample.response_length for sample in samples],
