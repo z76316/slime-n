@@ -1,4 +1,5 @@
 #### Use the base image
+# Thanks to Yang Wang (https://www.microsoft.com/en-us/research/people/yangwang5/) for working on the patch for this ROCm base Docker image to support virtual memory management on MI300X.
 FROM "rlfoundation.azurecr.io/rocm6.3.4:vllm-0.8.5-numa-patch-ubuntu-22.04"
 
 SHELL ["/bin/bash", "-ceuxo", "pipefail"]
@@ -211,21 +212,17 @@ WORKDIR /workspace/
 ###########################################
 
 
-
-
 #########################################
 #### Install megatron-core###############
 #########################################
-RUN pip uninstall -y megatron-core
-COPY Megatron-LM-amd_version /workspace/Megatron-LM-amd_version/
-WORKDIR /workspace/Megatron-LM-amd_version
-RUN pip install -vvv -e .
-WORKDIR /workspace/
+RUN pip uninstall -y megatron-core && \
+    git clone https://github.com/yushengsu-thu/Megatron-LM-amd_version.git && \
+    cd Megatron-LM-amd_version && \
+    pip install -vvv -e . && \
+    cd /workspace/
 #########################################
 #########################################
 #########################################
-
-
 
 
 
