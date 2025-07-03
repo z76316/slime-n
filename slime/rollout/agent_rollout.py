@@ -298,7 +298,7 @@ async def generate_agent_rollout(
                 tokens=token_ids,
                 response_length=response_length,
                 reward=record["reward"],
-                truncated=False,
+                status=Sample.Status.COMPLETED,
                 loss_mask=loss_mask,
                 metadata={**record["extra_info"], "raw_reward": record["raw_reward"]},
             )
