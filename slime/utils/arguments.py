@@ -521,6 +521,16 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 default="grpo",
             )
             parser.add_argument(
+                "--disable-compute-advantages-and-returns",
+                action="store_false",
+                dest="compute_advantages_and_returns",
+                help=(
+                    "Whether to disable computing advantages and returns. "
+                    "If set, we will not compute the advantages and returns, "
+                    "This is useful for sft or custom loss function."
+                ),
+            )
+            parser.add_argument(
                 "--use-kl-loss", action="store_true", default=False, help="whether to use KL loss from GRPO"
             )
             parser.add_argument("--kl-loss-coef", type=float, default=0.0, help="KL penalty in PPO")
@@ -701,7 +711,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 help="Whether to keep the rollout model on training process",
             )
             parser.add_argument(
-                "--offload-rollout",
+                "--offload-old-actor",
                 action="store_true",
                 help="Whether to update the rollout model on cpu",
             )
