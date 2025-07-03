@@ -489,6 +489,25 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
             )
             parser.add_argument("--kl-coef", type=float, default=0.01, help="KL penalty in PPO")
             parser.add_argument(
+                "--loss-type",
+                type=str,
+                choices=["policy_loss", "sft_loss", "custom_loss"],
+                default="policy_loss",
+                help=(
+                    "Choose loss type, currently support ppo policy_loss or sft_loss, "
+                    "if custom_loss is set, we will use the function path from `--custom-loss-function-path`."
+                ),
+            )
+            parser.add_argument(
+                "--custom-loss-function-path",
+                type=str,
+                default=None,
+                help=(
+                    "Path to the custom loss function, if the loss_type is `custom_loss`, "
+                    "we will use this function to calculate the loss. "
+                ),
+            )
+            parser.add_argument(
                 "--kl-loss-type",
                 type=str,
                 choices=["kl", "low_var_kl"],
