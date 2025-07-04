@@ -19,7 +19,6 @@ else:
 from megatron.core import mpu
 from ray.util.placement_group import PlacementGroup
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
-from sglang.srt.patch_torch import monkey_patch_torch_reductions
 from sglang.srt.utils import MultiprocessingSerializer
 from transformers import AutoConfig, AutoTokenizer
 
@@ -37,7 +36,9 @@ from slime.utils.timer import Timer, timer
         "env_vars": {
             # because sglang will always set NCCL_CUMEM_ENABLE to 0
             # we need also set it to 0 to prevent nccl error.
-            "NCCL_CUMEM_ENABLE": "0"
+            "NCCL_CUMEM_ENABLE": "0",
+            "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES": "1",
+            "RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES": "1",
         }
     },
 )
@@ -57,7 +58,7 @@ class TrainRayActor(RayActor):
         # TODO: currently this doesn't work as ray has already set torch.cuda.device_count().
         # os.environ.pop("CUDA_VISIBLE_DEVICES", None)
         # os.environ["LOCAL_RANK"] = str(ray.get_gpu_ids()[0])
-        os.environ["LOCAL_RANK"] = "0"
+        os.environ["LOCAL_RANK"] = str(ray.get_gpu_ids()[0])
 
     def init(self, args, role, with_ref=False):
         self.args = args
@@ -542,7 +543,6 @@ class TrainRayActor(RayActor):
             self._update_converted_params_from_tensor(converted_named_tensors)
 
     def _update_converted_params_from_tensor(self, converted_named_tensors):
-        monkey_patch_torch_reductions()
         ipc_handle = MultiprocessingSerializer.serialize(converted_named_tensors, output_str=True)
         ipc_handles = (
             [None] * dist.get_world_size(self._ipc_gather_group) if self._ipc_gather_src == dist.get_rank() else None
