@@ -403,7 +403,6 @@ class TrainRayActor(RayActor):
             ray.get([engine.reset_prefix_cache.remote() for engine in self.rollout_engines])
         dist.barrier()
 
-        self.args.update_weight_buffer_size
         buffer_size = 0
         converted_named_tensors = []
         for name, param in update_weight_utils.named_parameters(self.args, self.model):
