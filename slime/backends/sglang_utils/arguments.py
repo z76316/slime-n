@@ -46,7 +46,7 @@ def add_sglang_arguments(parser):
         "base_gpu_id",
         "nccl_port",
         "other_ports",
-        "skip_warmup",
+        "skip_server_warmup",
     ]
 
     def new_add_argument_wrapper(*name_or_flags, **kwargs):
