@@ -52,7 +52,7 @@ class SglangEngine:
             "pp_size": args.sglang_pp_size,
             "ep_size": args.sglang_ep_size,
             # always skip warmup to prevent warmup timeout.
-            "skip_warmup": True,
+            "skip_server_warmup": True,
         }
 
         if nnodes > 1:
