@@ -94,6 +94,8 @@ class SglangEngine:
         self.llm.flush_cache()
 
     def sleep(self, level=1):
+        # Adhoc solution to ensure no running requests
+        self.llm.flush_cache()
         self.llm.release_memory_occupation()
 
     def wake_up(self):
