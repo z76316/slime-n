@@ -12,14 +12,13 @@ from slime.utils.http_utils import find_available_port, get_host_info, run_route
 from .utils import Lock
 
 
-
 @ray.remote
 class RolloutRayActor(RayActor):
     def __init__(self, args, rank: int):
         self.args = args
         self.rank = rank
 
-    def init(self, dist_init_addr, port, nccl_port, other_ports, used_ports):
+    def init(self, dist_init_addr, port, nccl_port):
         # build infer engine
         self.infer_engine = SglangEngine(
             args=self.args,
@@ -27,8 +26,6 @@ class RolloutRayActor(RayActor):
             dist_init_addr=dist_init_addr,
             port=port,
             nccl_port=nccl_port,
-            other_ports=other_ports,
-            used_ports=used_ports,
         )
 
         if self.args.offload:
@@ -97,82 +94,52 @@ def create_rollout_engines(args, pg):
     # 3. dist_init_addr port
     # 4. other ports for dp_attention, which is of size 4 + dp_size
     num_engines_per_node = max(1, args.rollout_num_gpus_per_engine // 8)
-    addr_and_ports = [
-        {"port": None, "nccl_port": None, "dist_init_addr": None, "other_ports": None, "used_ports": None}
-        for _ in range(num_engines)
-    ]
+    addr_and_ports = [{} for _ in range(num_engines)]
     for rank, engine in enumerate(rollout_engines):
         if rank % num_engines_per_node != 0:
             continue
 
-        num_ports = num_engines_per_node + num_engines_per_node
-        if args.rollout_num_gpus_per_engine > 8:
-            assert (
-                args.rollout_num_gpus_per_engine % 8 == 0
-            ), "rollout_num_gpus_per_engine must be a multiple of 8 for multi-node serving."
-            num_node_per_engine = args.rollout_num_gpus_per_engine // 8
-            if rank % num_node_per_engine == 0:
-                # this is the first node in the engine, we need to allocate the dist_init_addr port
-                num_ports += 1
-                if args.sglang_enable_dp_attention:
-                    # if dp_attention is enabled, we need to allocate additional ports for dp_attention
-                    # 4 for the dp_attention and args.sglang_dp_size for the dp_attention
-                    num_ports += 4 + args.sglang_dp_size
-        else:
-            num_ports += num_engines_per_node
-            if args.sglang_enable_dp_attention:
-                # if dp_attention is enabled, we need to allocate additional ports for dp_attention
-                # 4 for the dp_attention and args.sglang_dp_size for the dp_attention
-                num_ports += (4 + args.sglang_dp_size) * num_engines_per_node
+        def get_addr_and_ports():
+            # use small ports to prevent ephemeral port between 32768 and 65536.
+            start_port = 10000
 
-        addr, ports = ray.get(
-            engine._get_current_node_ip_and_free_port.remote(
-                # use small ports to prevent ephemeral port between 32768 and 65536.
-                num_ports=num_ports,
-                start_port=random.randint(10000, 20000),
-            )
-        )
+            def port(consecutive=1):
+                nonlocal start_port
+                _, port = ray.get(
+                    engine._get_current_node_ip_and_free_port.remote(
+                        start_port=start_port,
+                        consecutive=consecutive,
+                    )
+                )
+                start_port = port + consecutive
+                return port
+
+            def addr():
+                addr, _ = ray.get(engine._get_current_node_ip_and_free_port.remote())
+                return addr
+
+            return addr, port
+
+        get_addr, get_port = get_addr_and_ports()
 
         for i in range(num_engines_per_node):
-            addr_and_ports[rank + i]["used_ports"] = ports.copy()
-
-        for i in range(num_engines_per_node):
-            addr_and_ports[rank + i]["port"] = ports.pop(0)
-            addr_and_ports[rank + i]["nccl_port"] = ports.pop(0)
+            addr_and_ports[rank + i]["port"] = get_port()
+            addr_and_ports[rank + i]["nccl_port"] = get_port()
 
         if args.rollout_num_gpus_per_engine > 8:
             num_node_per_engine = args.rollout_num_gpus_per_engine // 8
             if rank % num_node_per_engine == 0:
                 # this is the first node in the engine, we need to allocate the dist_init_addr port
-                dist_init_addr = f"{addr}:{ports.pop(0)}"
+                dist_init_addr = f"{get_addr()}:{get_port(6 + args.sglang_dp_size)}"
                 for i in range(num_node_per_engine):
                     addr_and_ports[rank + i]["dist_init_addr"] = dist_init_addr
-
-                if args.sglang_enable_dp_attention:
-                    other_ports = []
-                    for _ in range(4 + args.sglang_dp_size):
-                        other_ports.append(ports.pop(0))
-                    for i in range(num_node_per_engine):
-                        addr_and_ports[rank + i]["other_ports"] = other_ports
         else:
             for i in range(num_engines_per_node):
-                addr_and_ports[rank + i]["dist_init_addr"] = f"{addr}:{ports.pop(0)}"
-                if args.sglang_enable_dp_attention:
-                    addr_and_ports[rank + i]["other_ports"] = []
-                    for _ in range(4 + args.sglang_dp_size):
-                        addr_and_ports[rank + i]["other_ports"].append(ports.pop(0))
-
-        assert len(ports) == 0
+                addr_and_ports[rank + i]["dist_init_addr"] = f"{get_addr()}:{get_port(6 + args.sglang_dp_size)}"
 
     for i in range(num_engines):
-        assert addr_and_ports[i]["port"] is not None, f"Engine {i} port is not set."
-        assert addr_and_ports[i]["nccl_port"] is not None, f"Engine {i} port is not set."
-        assert addr_and_ports[i]["dist_init_addr"] is not None, f"Engine {i} dist_init_addr is not set."
-        if args.sglang_enable_dp_attention:
-            assert addr_and_ports[i]["other_ports"] is not None, f"Engine {i} other_ports is not set."
-            assert (
-                len(addr_and_ports[i]["other_ports"]) == 4 + args.sglang_dp_size
-            ), f"Engine {i} other_ports should have 4 + sglang_dp_size ports, got {len(addr_and_ports[i]['other_ports'])}."
+        for key in ["port", "nccl_port", "dist_init_addr"]:
+            assert key in addr_and_ports[i], f"Engine {i} {key} is not set."
         print(f"Ports for engine {i}: {addr_and_ports[i]}")
 
     # don't ray.get here to overlap train actor init with rollout engine init.

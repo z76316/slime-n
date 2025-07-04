@@ -45,7 +45,6 @@ def add_sglang_arguments(parser):
         "gpu_id_step",
         "base_gpu_id",
         "nccl_port",
-        "other_ports",
         "skip_server_warmup",
     ]
 
