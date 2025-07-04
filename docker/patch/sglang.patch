@@ -130,29 +130,27 @@ index a0a3374..3abb376 100644
              named_tensors=MultiprocessingSerializer.deserialize(
                  recv_req.serialized_named_tensors[self.tp_rank]
 diff --git a/python/sglang/srt/server_args.py b/python/sglang/srt/server_args.py
-index ef957dd..870fc7e 100644
+index ef957dd..46dcf7c 100644
 --- a/python/sglang/srt/server_args.py
 +++ b/python/sglang/srt/server_args.py
-@@ -124,6 +124,8 @@ class ServerArgs:
+@@ -124,6 +124,7 @@ class ServerArgs:
  
      # Multi-node distributed serving
      dist_init_addr: Optional[str] = None
 +    nccl_port: Optional[int] = None
-+    other_ports: Optional[List[int]] = None
      nnodes: int = 1
      node_rank: int = 0
  
-@@ -1196,6 +1198,9 @@ class ServerArgs:
+@@ -1196,6 +1197,8 @@ class ServerArgs:
              help="Set multimodal attention backend.",
          )
  
 +        parser.add_argument("--nccl-port", type=int, default=None)
-+        parser.add_argument("--other-ports", type=int, nargs="+", default=None)
 +
          # Expert parallelism
          parser.add_argument(
              "--expert-parallel-size",
-@@ -1739,14 +1744,17 @@ class PortArgs:
+@@ -1739,14 +1742,17 @@ class PortArgs:
  
      @staticmethod
      def init_new(server_args, dp_rank: Optional[int] = None) -> "PortArgs":
@@ -178,30 +176,3 @@ index ef957dd..870fc7e 100644
  
          if not server_args.enable_dp_attention:
              # Normal case, use IPC within a single node
-@@ -1768,6 +1776,26 @@ class PortArgs:
-             else:
-                 dist_init_addr = server_args.dist_init_addr.split(":")
- 
-+            if server_args.other_ports is not None:
-+                assert port not in server_args.other_ports
-+                tokenizer_port = server_args.other_ports[0]
-+                detokenizer_port = server_args.other_ports[1]
-+                rpc_ipc_port = server_args.other_ports[2]
-+                if dp_rank is None:
-+                    scheduler_input_port = server_args.other_ports[
-+                        3
-+                    ]  # TokenizerManager to DataParallelController
-+                else:
-+                    scheduler_input_port = server_args.other_ports[3 + 1 + dp_rank]
-+
-+                return PortArgs(
-+                    tokenizer_ipc_name=f"tcp://{dist_init_host}:{tokenizer_port}",
-+                    scheduler_input_ipc_name=f"tcp://{dist_init_host}:{scheduler_input_port}",
-+                    detokenizer_ipc_name=f"tcp://{dist_init_host}:{detokenizer_port}",
-+                    nccl_port=port,
-+                    rpc_ipc_name=f"tcp://{dist_init_host}:{rpc_ipc_port}",
-+                )
-+
-             assert (
-                 len(dist_init_addr) == 2
-             ), "please provide --dist-init-addr as host:port of head node"

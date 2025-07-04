@@ -23,7 +23,7 @@ def get_base_gpu_id(args, rank):
 
 class SglangEngine:
 
-    def __init__(self, args, rank, dist_init_addr, port, nccl_port, other_ports=None, used_ports=None):
+    def __init__(self, args, rank, dist_init_addr, port, nccl_port):
         self.args = args
 
         # remove the CUDA_VISIBLE_DEVICES set by ray and use base_gpu_id
@@ -54,12 +54,6 @@ class SglangEngine:
             # always skip warmup to prevent warmup timeout.
             "skip_server_warmup": True,
         }
-
-        if nnodes > 1:
-            kwargs["other_ports"] = other_ports
-
-        if used_ports is not None:
-            os.environ["SGLANG_USED_PORT"] = ",".join(map(str, used_ports))
 
         unused_keys = set(kwargs.keys())
         for attr in dataclasses.fields(ServerArgs):
