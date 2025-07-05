@@ -93,7 +93,7 @@ def create_rollout_engines(args, pg):
     # 2. nccl port
     # 3. dist_init_addr port
     # 4. other ports for dp_attention, which is of size 4 + dp_size
-    num_engines_per_node = max(1, args.rollout_num_gpus_per_engine // 8)
+    num_engines_per_node = max(1, 8 // args.rollout_num_gpus_per_engine)
     addr_and_ports = [{} for _ in range(num_engines)]
     for rank, engine in enumerate(rollout_engines):
         if rank % num_engines_per_node != 0:
