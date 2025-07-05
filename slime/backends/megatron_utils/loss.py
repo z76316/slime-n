@@ -281,16 +281,9 @@ def loss_function(args, batch, num_microbatches, logits):
             raise ValueError(f"Unknown loss type: {args.loss_type}")
 
     # Here we need to divide by cp_size because to cancel the multiply in Megatron.
-    if args.use_dynamic_batch_size:
-        # The same scaling as verl.
-        loss = (
-            loss
-            * num_microbatches
-            / args.global_batch_size
-            * mpu.get_data_parallel_world_size(with_context_parallel=False)
-        )
-    else:
-        loss = loss / mpu.get_context_parallel_world_size()
+    loss = (
+        loss * num_microbatches / args.global_batch_size * mpu.get_data_parallel_world_size(with_context_parallel=True)
+    )
 
     return (
         loss,
