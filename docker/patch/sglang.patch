@@ -1,5 +1,5 @@
 diff --git a/python/sglang/srt/configs/model_config.py b/python/sglang/srt/configs/model_config.py
-index 6f202db..41f93d4 100644
+index 25104bd..6853784 100644
 --- a/python/sglang/srt/configs/model_config.py
 +++ b/python/sglang/srt/configs/model_config.py
 @@ -405,14 +405,14 @@ class ModelConfig:
@@ -25,31 +25,6 @@ index 6f202db..41f93d4 100644
  
              # Verify quantization configurations.
              if self.quantization is None:
-diff --git a/python/sglang/srt/entrypoints/http_server.py b/python/sglang/srt/entrypoints/http_server.py
-index 0f258a9..3c5bb55 100644
---- a/python/sglang/srt/entrypoints/http_server.py
-+++ b/python/sglang/srt/entrypoints/http_server.py
-@@ -712,6 +712,20 @@ async def separate_reasoning_request(obj: SeparateReasoningReqInput, request: Re
-     return ORJSONResponse(content=response_data, status_code=200)
- 
- 
-+@app.post("/pause_generation")
-+async def pause_generation(request: Request):
-+    """Pause generation."""
-+    await _global_state.tokenizer_manager.pause_generation()
-+    return ORJSONResponse(content="Generation paused.", status_code=200)
-+
-+
-+@app.post("/continue_generation")
-+async def continue_generation(request: Request):
-+    """Continue generation."""
-+    await _global_state.tokenizer_manager.continue_generation()
-+    return ORJSONResponse(content="Generation continued.", status_code=200)
-+
-+
- ##### OpenAI-compatible API endpoints #####
- 
- 
 diff --git a/python/sglang/srt/layers/quantization/fp8.py b/python/sglang/srt/layers/quantization/fp8.py
 index f2c0d61..e548f39 100644
 --- a/python/sglang/srt/layers/quantization/fp8.py
@@ -69,90 +44,3 @@ index f2c0d61..e548f39 100644
              return
  
          layer.weight = torch.nn.Parameter(layer.weight.data, requires_grad=False)
-diff --git a/python/sglang/srt/managers/tokenizer_manager.py b/python/sglang/srt/managers/tokenizer_manager.py
-index b16bb8a..cb88b15 100644
---- a/python/sglang/srt/managers/tokenizer_manager.py
-+++ b/python/sglang/srt/managers/tokenizer_manager.py
-@@ -203,6 +203,8 @@ class TokenizerManager:
-         self.is_image_gen = self.model_config.is_image_gen
-         self.context_len = self.model_config.context_len
-         self.image_token_id = self.model_config.image_token_id
-+        self._updating = False
-+        self._cond = asyncio.Condition()
- 
-         if self.model_config.is_multimodal:
-             import_processors()
-@@ -421,6 +423,9 @@ class TokenizerManager:
-         request: Optional[fastapi.Request] = None,
-     ):
-         created_time = time.time()
-+        async with self._cond:
-+            await self._cond.wait_for(lambda: not self._updating)
-+
-         self.auto_create_handle_loop()
-         obj.normalize_batch_and_arguments()
- 
-@@ -902,6 +907,16 @@ class TokenizerManager:
-         self.auto_create_handle_loop()
-         await self.expert_distribution_communicator(ExpertDistributionReq.DUMP_RECORD)
- 
-+    async def pause_generation(self):
-+        async with self._cond:
-+            self._updating = True
-+            self.abort_request(abort_all=True)
-+
-+    async def continue_generation(self):
-+        async with self._cond:
-+            self._updating = False
-+            self._cond.notify_all()
-+
-     async def update_weights_from_disk(
-         self,
-         obj: UpdateWeightFromDiskReqInput,
-diff --git a/python/sglang/srt/server_args.py b/python/sglang/srt/server_args.py
-index ef957dd..46dcf7c 100644
---- a/python/sglang/srt/server_args.py
-+++ b/python/sglang/srt/server_args.py
-@@ -124,6 +124,7 @@ class ServerArgs:
- 
-     # Multi-node distributed serving
-     dist_init_addr: Optional[str] = None
-+    nccl_port: Optional[int] = None
-     nnodes: int = 1
-     node_rank: int = 0
- 
-@@ -1196,6 +1197,8 @@ class ServerArgs:
-             help="Set multimodal attention backend.",
-         )
- 
-+        parser.add_argument("--nccl-port", type=int, default=None)
-+
-         # Expert parallelism
-         parser.add_argument(
-             "--expert-parallel-size",
-@@ -1739,14 +1742,17 @@ class PortArgs:
- 
-     @staticmethod
-     def init_new(server_args, dp_rank: Optional[int] = None) -> "PortArgs":
--        port = server_args.port + random.randint(100, 1000)
--        while True:
--            if is_port_available(port):
--                break
--            if port < 60000:
--                port += 42
--            else:
--                port -= 43
-+        if server_args.nccl_port is None:
-+            port = server_args.port + random.randint(100, 1000)
-+            while True:
-+                if is_port_available(port):
-+                    break
-+                if port < 60000:
-+                    port += 42
-+                else:
-+                    port -= 43
-+        else:
-+            port = server_args.nccl_port
- 
-         if not server_args.enable_dp_attention:
-             # Normal case, use IPC within a single node

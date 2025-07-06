@@ -27,7 +27,7 @@ micromamba run -n slime pip install cmake ninja
 # sglang deps
 ####################
 cd /root/
-git clone https://github.com/sgl-project/sglang.git --branch v0.4.7
+git clone https://github.com/sgl-project/sglang.git --branch v0.4.9 --depth 1
 cd /root/sglang/
 micromamba run -n slime pip -v install -e "python[all]"
 micromamba run -n slime pip install sglang-router
@@ -35,6 +35,9 @@ micromamba run -n slime pip install sglang-router
 ####################
 # megatron deps
 ####################
+TORCH_CUDA_ARCH_LIST="9.0;9.0a" micromamba run -n slime \
+  pip -v install --no-build-isolation \
+  git+https://github.com/fanshiqing/grouped_gemm@v1.1.4
 # apex
 TORCH_CUDA_ARCH_LIST="9.0;9.0a" NVCC_APPEND_FLAGS="--threads 4" \
 micromamba run -n slime \

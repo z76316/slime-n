@@ -33,8 +33,20 @@ RUN git clone https://github.com/NVIDIA/Megatron-LM.git --recursive && \
 
 # sandwitch norm for GLM models
 COPY patch/megatron-sandwich_norm.patch /root/Megatron-LM/
-RUN cd Megatron-LM && git apply megatron-sandwich_norm.patch && rm megatron-sandwich_norm.patch
+RUN cd Megatron-LM && \
+    git apply megatron-sandwich_norm.patch --3way && \
+    if grep -R -n '^<<<<<<< ' .; then \
+      echo "Patch failed to apply cleanly. Please resolve conflicts." && \
+      exit 1; \
+    fi && \
+    rm megatron-sandwich_norm.patch
 
 # sglang patch
 COPY patch/sglang.patch /sgl-workspace/sglang/
-RUN cd /sgl-workspace/sglang && git apply sglang.patch && rm sglang.patch
+RUN cd /sgl-workspace/sglang && \
+  git apply sglang.patch && \
+  if grep -R -n '^<<<<<<< ' .; then \
+    echo "Patch failed to apply cleanly. Please resolve conflicts." && \
+    exit 1; \
+  fi && \
+  rm sglang.patch

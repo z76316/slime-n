@@ -45,7 +45,6 @@ cd slime
 pip install -e .
 ```
 
-- 我们正在与 SGLang 社区合作，将 [sglang.patch](docker/patch/sglang.patch) 中的更新合入主分支；
 - 对于不方便使用 docker 的场景，请参考 [从零搭建环境](./docs/zh/build.md)。
 
 ### 示例：GLM-4-9B 与 Qwen3-4B

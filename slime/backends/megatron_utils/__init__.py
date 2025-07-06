@@ -1,3 +1,4 @@
+import logging
 from .arguments import _vocab_size_with_padding, parse_args, validate_args
 from .checkpoint import load_checkpoint, save_checkpoint
 from .data import (
@@ -14,6 +15,10 @@ from .data import (
 from .initialize import init
 from .loss import compute_advantages_and_returns, get_log_probs_and_entropy, loss_function
 from .model import forward_only, initialize_model_and_optimizer, save, train
+
+
+logging.getLogger().setLevel(logging.WARNING)
+
 
 __all__ = [
     "parse_args",
