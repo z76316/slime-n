@@ -1,12 +1,7 @@
 FROM lmsysorg/sglang:dev AS base
 
-# sgl-router
-WORKDIR /sgl-workspace/sglang
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-RUN pip install setuptools-rust wheel build
-RUN . $HOME/.cargo/env && cd sgl-router/ && \
-    cargo build -j 64 && python3 -m build && pip install dist/*.whl --force-reinstall
-
+# TODO: change to pip install sglang-router after it has a new release
+RUN pip install https://github.com/zhuzilin/sgl-router/releases/download/dev/sglang_router-0.1.4-cp310-cp310-linux_x86_64.whl --force-reinstall
 RUN pip install ray[default]
 RUN pip install httpx[http2] wandb pylatexenc blobfile accelerate "mcp[cli]"
 RUN pip install git+https://github.com/zhuzilin/cumem_allocator.git

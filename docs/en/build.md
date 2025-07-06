@@ -30,7 +30,8 @@ cd /root/
 git clone https://github.com/sgl-project/sglang.git --branch v0.4.9 --depth 1
 cd /root/sglang/
 micromamba run -n slime pip -v install -e "python[all]"
-micromamba run -n slime pip install sglang-router
+# TODO: change to pip install sglang-router after it has a new release
+micromamba run -n slime pip install https://github.com/zhuzilin/sgl-router/releases/download/dev/sglang_router-0.1.4-cp310-cp310-linux_x86_64.whl --force-reinstall
 
 ####################
 # megatron deps
