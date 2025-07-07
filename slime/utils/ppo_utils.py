@@ -48,18 +48,22 @@ def compute_policy_loss(
 ):
     approx_kl = old_logprobs - log_probs
     ratio = (-approx_kl).exp()
-    pg_losses = -ratio * advantages
+    pg_losses1 = -ratio * advantages
     pg_losses2 = -ratio.clamp(1 - eps_clip, 1 + eps_clip_high) * advantages
-    pg_loss = torch.max(pg_losses, pg_losses2)
-    clipfrac = torch.gt(pg_losses2, pg_losses).float()
+    clip_pg_losses1 = torch.maximum(pg_losses1, pg_losses2)
+    clipfrac = torch.gt(pg_losses2, pg_losses1).float()
 
     if eps_clip_c is not None:
         assert (
             eps_clip_c > 1.0
         ), f"The lower bound of the clip_ratio_c for dual-clip PPO should be greater than 1.0, but get the value: {eps_clip_c}."
         pg_losses3 = -eps_clip_c * advantages
-        pg_loss = torch.min(pg_loss, pg_losses3)
-    return pg_loss, clipfrac, approx_kl
+        clip_pg_losses2 = torch.min(pg_losses3, clip_pg_losses1)
+        pg_losses = torch.where(advantages < 0, clip_pg_losses2, clip_pg_losses1)
+    else:
+        pg_losses = clip_pg_losses1
+
+    return pg_losses, clipfrac, approx_kl
 
 
 def compute_log_probs(logits: torch.Tensor, tokens: torch.Tensor, process_group: Optional[dist.ProcessGroup]):
