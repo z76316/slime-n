@@ -2,7 +2,7 @@
 
 [中文版](./README_zh.md)
 
-**slime** is an LLM post-training framework aiming at RL scaling, providing two core capabilities:
+**slime** is an LLM post-training framework for RL scaling, providing two core capabilities:
 
 1.  **High-Performance Training**: Supports efficient training in various modes by connecting Megatron with SGLang;
 2.  **Flexible Data Generation**: Enables arbitrary training data generation workflows through custom data generation interfaces and server-based engines.
