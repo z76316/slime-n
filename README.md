@@ -46,6 +46,7 @@ pip install -e .
 ```
 
 - If you prefer not to use Docker, or if it's inconvenient, please refer to [Setting up the Environment from Scratch](./docs/en/build.md).
+- For AMD support, please refer to [AMD Tutorial](./docs/en/amd_tutorial.md).
 
 ### Example: GLM4-9B and Qwen3-4B
 

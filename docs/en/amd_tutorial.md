@@ -1,4 +1,4 @@
-# AMD Toturial
+# AMD Tutorial
 
 ⚠️ If you encounter problems on AMD instinct, feel free to reach out [Yusheng Su](https://yushengsu-thu.github.io/). 
 

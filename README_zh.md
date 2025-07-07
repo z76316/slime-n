@@ -45,7 +45,8 @@ cd slime
 pip install -e .
 ```
 
-- 对于不方便使用 docker 的场景，请参考 [从零搭建环境](./docs/zh/build.md)。
+- 对于不方便使用 docker 的场景，请参考 [从零搭建环境](./docs/zh/build.md)；
+- 对于 AMD 支持，请参考 [AMD 使用教程](./docs/en/amd_tutorial.md)。
 
 ### 示例：GLM-4-9B 与 Qwen3-4B
 
