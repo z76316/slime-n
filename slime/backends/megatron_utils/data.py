@@ -6,11 +6,11 @@ import ray
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
-import wandb
 from megatron.core import mpu
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.utils import get_model_config
 
+import wandb
 from slime.utils.flops_utils import calculate_fwd_flops
 from slime.utils.memory_utils import clear_memory
 from slime.utils.seqlen_balancing import get_seqlen_balanced_partitions
@@ -287,7 +287,30 @@ def process_rollout_data(rollout_id, args, data_buffer):
     Timer().seq_lens = total_lengths
 
     if args.balance_data:
-        parititions = get_seqlen_balanced_partitions(total_lengths, dp_size, equal_size=True)
+        # Group-aware partitioning to keep each group together
+        n_samples_per_prompt = getattr(args, "n_samples_per_prompt", 1)
+        # Calculate group-level lengths (sum of lengths for each group)
+        num_groups = len(total_lengths) // n_samples_per_prompt
+        group_lengths = []
+        for i in range(num_groups):
+            start_idx = i * n_samples_per_prompt
+            end_idx = start_idx + n_samples_per_prompt
+            group_total_length = sum(total_lengths[start_idx:end_idx])
+            group_lengths.append(group_total_length)
+
+        # Get partitions at group level
+        group_partitions = get_seqlen_balanced_partitions(group_lengths, dp_size, equal_size=True)
+
+        # Expand group partitions to trajectory level
+        parititions = []
+        for dp_rank_groups in group_partitions:
+            trajectory_indices = []
+            for group_idx in dp_rank_groups:
+                # Add all trajectories in this group
+                start_idx = group_idx * n_samples_per_prompt
+                end_idx = start_idx + n_samples_per_prompt
+                trajectory_indices.extend(range(start_idx, end_idx))
+            parititions.append(trajectory_indices)
 
     def get_partition(val):
         if args.balance_data:
