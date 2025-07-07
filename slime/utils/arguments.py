@@ -686,6 +686,12 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 "--group-rm", action="store_true", default=False, help="Whether to do rm on a whole group."
             )
             parser.add_argument(
+                "--rm-url",
+                type=str,
+                default=None,
+                help="URL for the reward model service for --rm-type remote_rm, e.g. http://localhost:8000",
+            )
+            parser.add_argument(
                 "--custom-rm-path",
                 type=str,
                 default=None,
