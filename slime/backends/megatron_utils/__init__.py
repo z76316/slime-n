@@ -1,4 +1,5 @@
 import logging
+
 from .arguments import _vocab_size_with_padding, parse_args, validate_args
 from .checkpoint import load_checkpoint, save_checkpoint
 from .data import (
@@ -12,10 +13,9 @@ from .data import (
     process_rollout_data,
     set_metadata,
 )
-from .initialize import init
+from .initialize import get_gloo_group, init
 from .loss import compute_advantages_and_returns, get_log_probs_and_entropy, loss_function
-from .model import forward_only, initialize_model_and_optimizer, save, train
-
+from .model import forward_only, initialize_model_and_optimizer, save, train, warmup
 
 logging.getLogger().setLevel(logging.WARNING)
 
@@ -27,6 +27,7 @@ __all__ = [
     "save_checkpoint",
     "get_batch",
     "get_data_iterator",
+    "get_gloo_group",
     "process_rollout_data",
     "init",
     "set_metadata",
@@ -41,6 +42,7 @@ __all__ = [
     "forward_only",
     "train",
     "save",
+    "warmup",
     "initialize_model_and_optimizer",
     "_vocab_size_with_padding",
 ]

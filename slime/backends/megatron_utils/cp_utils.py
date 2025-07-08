@@ -20,7 +20,7 @@ def get_logits_and_tokens_offset_with_cp(
     chunk_0 = (cp_rank * chunk_size, (cp_rank + 1) * chunk_size)
     chunk_1 = ((2 * cp_size - cp_rank - 1) * chunk_size, (2 * cp_size - cp_rank) * chunk_size)
 
-    # the offset of 2 logits, not that the logits need a "-1".
+    # the offset of 2 logits, note that the logits need a "-1".
     logits_0 = (max(chunk_0[0], prompt_length - 1), min(chunk_0[1], total_length - 1))
     logits_1 = (max(chunk_1[0], prompt_length - 1), min(chunk_1[1], total_length - 1))
 

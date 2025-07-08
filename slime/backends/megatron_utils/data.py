@@ -375,7 +375,7 @@ def log_rollout_data(rollout_id, args):
                 log_dict,
                 gathered_log_dict,
                 dst=mpu.get_data_parallel_src_rank(with_context_parallel=True),
-                group=mpu.get_data_parallel_group(with_context_parallel=True),
+                group=mpu.get_data_parallel_group_gloo(with_context_parallel=True),
             )
             dp_size = mpu.get_data_parallel_world_size(with_context_parallel=True)
             reduced_log_dict = {
@@ -394,7 +394,7 @@ def log_rollout_data(rollout_id, args):
                 log_dict,
                 None,
                 dst=mpu.get_data_parallel_src_rank(with_context_parallel=True),
-                group=mpu.get_data_parallel_group(with_context_parallel=True),
+                group=mpu.get_data_parallel_group_gloo(with_context_parallel=True),
             )
 
     if args.log_multi_turn:
@@ -442,7 +442,7 @@ def log_multi_turn_data(rollout_id, args):
                 log_dict,
                 gathered_log_dict,
                 dst=mpu.get_data_parallel_src_rank(with_context_parallel=True),
-                group=mpu.get_data_parallel_group(with_context_parallel=True),
+                group=mpu.get_data_parallel_group_gloo(with_context_parallel=True),
             )
             dp_size = mpu.get_data_parallel_world_size(with_context_parallel=True)
             reduced_log_dict = {
@@ -456,7 +456,7 @@ def log_multi_turn_data(rollout_id, args):
                 log_dict,
                 None,
                 dst=mpu.get_data_parallel_src_rank(with_context_parallel=True),
-                group=mpu.get_data_parallel_group(with_context_parallel=True),
+                group=mpu.get_data_parallel_group_gloo(with_context_parallel=True),
             )
 
 
@@ -507,7 +507,7 @@ def log_passrate(rollout_id, args):
                 log_dict,
                 gathered_log_dict,
                 dst=mpu.get_data_parallel_src_rank(with_context_parallel=True),
-                group=mpu.get_data_parallel_group(with_context_parallel=True),
+                group=mpu.get_data_parallel_group_gloo(with_context_parallel=True),
             )
             dp_size = mpu.get_data_parallel_world_size(with_context_parallel=True)
             reduced_log_dict = {
@@ -521,7 +521,7 @@ def log_passrate(rollout_id, args):
                 log_dict,
                 None,
                 dst=mpu.get_data_parallel_src_rank(with_context_parallel=True),
-                group=mpu.get_data_parallel_group(with_context_parallel=True),
+                group=mpu.get_data_parallel_group_gloo(with_context_parallel=True),
             )
 
 
