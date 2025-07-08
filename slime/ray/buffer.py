@@ -186,7 +186,7 @@ class Buffer:
             generate_rollout = self.eval_generate_rollout if evaluation else self.generate_rollout
             data = generate_rollout(self.args, rollout_id, self, evaluation=evaluation)
             # flatten the data if it is a list of lists
-            if isinstance(data[0], list):
+            if not evaluation and isinstance(data[0], list):
                 data = sum(data, [])
 
         self._set_data(data, evaluation=evaluation)
