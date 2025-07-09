@@ -290,10 +290,7 @@ class TrainRayActor(RayActor):
         print_memory("begin train")
 
         if self.args.offload:
-            allocator = CuMemAllocator.get_instance()
-            allocator.wake_up(("model"))
-
-        print_memory("after wake_up model")
+            self.wake_up(("model"))
 
         with timer("train"):
             with timer("data_preprocess"):
