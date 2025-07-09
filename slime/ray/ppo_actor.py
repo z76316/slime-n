@@ -386,6 +386,9 @@ class TrainRayActor(RayActor):
         Timer().start("train_wait")
 
     def eval(self, rollout_id):
+        if self.args.debug_train_only:
+            return
+
         # TODO: is logging enough?
         megatron_utils.log_eval_data(rollout_id, self.args, self.data_buffer)
 

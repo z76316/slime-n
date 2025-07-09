@@ -177,6 +177,10 @@ class Buffer:
 
     def generate(self, rollout_id, evaluation=False):
         self.rollout_id = rollout_id
+        if self.args.debug_train_only and evaluation:
+            # if debug train only, we don't generate evaluation data
+            return
+
         if not evaluation and self.args.load_debug_rollout_data:
             data = pickle.load(
                 open(self.args.load_debug_rollout_data.format(rollout_id=rollout_id), "rb"),
