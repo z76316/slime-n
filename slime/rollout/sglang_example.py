@@ -70,20 +70,25 @@ async def generate(args, sample: Sample, sampling_params) -> Sample:
         sample.status == Sample.Status.PENDING or sample.status == Sample.Status.ABORTED
     ), f"Sample status is {sample.status}"
 
-    # Handle partial rollout samples: continue generation from existing response
-    input_text = sample.prompt + sample.response
+    if len(sample.response) > 0:
+        response_token_ids = state.tokenizer(sample.response, add_special_tokens=False)["input_ids"]
+        sampling_params["max_new_tokens"] -= len(response_token_ids)
 
-    payload = {
-        "text": input_text,
-        "sampling_params": sampling_params,
-    }
+    if sampling_params["max_new_tokens"] > 0:
+        # Handle partial rollout samples: continue generation from existing response
+        input_text = sample.prompt + sample.response
 
-    output = await post(url, payload, use_http2=args.use_http2)
-    sample.response += output["text"]
+        payload = {
+            "text": input_text,
+            "sampling_params": sampling_params,
+        }
 
-    if output["meta_info"]["finish_reason"]["type"] == "abort":
-        sample.status = Sample.Status.ABORTED
-        return sample
+        output = await post(url, payload, use_http2=args.use_http2)
+        sample.response += output["text"]
+
+        if output["meta_info"]["finish_reason"]["type"] == "abort":
+            sample.status = Sample.Status.ABORTED
+            return sample
 
     prompt_tokens_ids = state.tokenizer(sample.prompt, add_special_tokens=False)["input_ids"]
     response_token_ids = state.tokenizer(sample.response, add_special_tokens=False)["input_ids"]
