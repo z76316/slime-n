@@ -653,6 +653,15 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                     "This is useful for debugging the rollout generation function."
                 ),
             )
+            parser.add_argument(
+                "--skip-warmup",
+                action="store_true",
+                default=False,
+                help=(
+                    "Whether to skip the warmup phase. "
+                    "This is useful for debugging the training process without waiting for the warmup phase to finish."
+                ),
+            )
             return parser
 
         def add_network_arguments(parser):

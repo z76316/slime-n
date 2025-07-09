@@ -111,7 +111,8 @@ def setup_model_and_optimizer(
         skip_load_to_model_and_opt=False,
     )
 
-    warmup(args, model, optimizer)
+    if not args.skip_warmup:
+        warmup(args, model, optimizer)
 
     print(f"Loaded checkpoint at iteration {iteration}")
     return model, optimizer, opt_param_scheduler, iteration
