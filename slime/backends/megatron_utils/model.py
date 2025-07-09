@@ -10,7 +10,6 @@ from megatron.core.distributed import finalize_model_grads
 from megatron.core.models.gpt import GPTModel
 from megatron.core.optimizer import OptimizerConfig, get_megatron_optimizer
 from megatron.core.optimizer_param_scheduler import OptimizerParamScheduler
-from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.pipeline_parallel import get_forward_backward_func
 from megatron.core.utils import get_model_config
 from megatron.training.global_vars import get_args
@@ -19,7 +18,6 @@ from megatron.training.training import get_model
 import wandb
 
 from .checkpoint import load_checkpoint, save_checkpoint
-from .cp_utils import get_logits_and_tokens_offset_with_cp
 from .data import get_batch, set_local_storage
 from .loss import get_log_probs_and_entropy, loss_function
 from .models import get_model_provider_and_type
@@ -111,105 +109,8 @@ def setup_model_and_optimizer(
         skip_load_to_model_and_opt=False,
     )
 
-    if not args.skip_warmup:
-        warmup(args, model, optimizer)
-
     print(f"Loaded checkpoint at iteration {iteration}")
     return model, optimizer, opt_param_scheduler, iteration
-
-
-def warmup(args, model, optimizer):
-    num_microbatches = 4
-
-    def warmp_forward_step(data_iterator, model: GPTModel):
-        """Forward training step.
-
-        Args:
-            data_iterator : Input data iterator
-            model (GPTModel): The GPT Model
-        """
-
-        # Get the batch.
-        prompt_seq_len_per_gpu = 128
-        response_seq_len_per_gpu = 128
-        seq_len_per_gpu = prompt_seq_len_per_gpu + response_seq_len_per_gpu
-
-        cp_size = mpu.get_context_parallel_world_size()
-        response_seq_len = response_seq_len_per_gpu * cp_size
-        seq_len = seq_len_per_gpu * cp_size
-
-        if cp_size > 1:
-            chunk_size, _, logits_offset, _ = get_logits_and_tokens_offset_with_cp(seq_len, response_seq_len)
-            assert 2 * chunk_size == seq_len_per_gpu
-            logits_len = logits_offset[0][1] - logits_offset[0][0] + logits_offset[1][1] - logits_offset[1][0]
-        else:
-            logits_len = response_seq_len
-
-        unconcat_tokens = torch.tensor([0] * seq_len, dtype=torch.long, device=torch.cuda.current_device())
-
-        cu_seqlens = torch.tensor([0, seq_len], dtype=torch.int, device=torch.cuda.current_device())
-        max_seqlen = seq_len
-
-        packed_seq_params = PackedSeqParams(
-            cu_seqlens_q=cu_seqlens,
-            cu_seqlens_kv=cu_seqlens,
-            max_seqlen_q=max_seqlen,
-            max_seqlen_kv=max_seqlen,
-            qkv_format="thd",
-        )
-
-        batch = {
-            "total_lengths": [seq_len],
-            "response_lengths": [response_seq_len],
-            "unconcat_tokens": [unconcat_tokens],
-            "tokens": torch.zeros((seq_len_per_gpu,), dtype=torch.long, device=torch.cuda.current_device()).unsqueeze(
-                0
-            ),
-            "loss_masks": [torch.ones((response_seq_len,), dtype=torch.int, device=torch.cuda.current_device())],
-            "advantages": [torch.randn((logits_len,), dtype=torch.bfloat16, device=torch.cuda.current_device())],
-            "log_probs": [torch.randn((logits_len,), dtype=torch.bfloat16, device=torch.cuda.current_device())],
-            "ref_log_probs": [torch.randn((logits_len,), dtype=torch.bfloat16, device=torch.cuda.current_device())],
-            "packed_seq_params": packed_seq_params,
-        }
-
-        output_tensor = model(
-            input_ids=batch["tokens"],
-            position_ids=None,
-            attention_mask=None,
-            labels=None,
-            packed_seq_params=batch["packed_seq_params"],
-        )
-
-        return output_tensor, partial(loss_function, args, batch, num_microbatches)
-
-    _ = setup_before_train(args, model, optimizer)
-
-    # Set grad to zero.
-    for model_chunk in model:
-        model_chunk.zero_grad_buffer()
-    optimizer.zero_grad()
-
-    if args.custom_megatron_before_train_step_hook_path:
-        from slime.utils.misc import load_function
-
-        custom_before_train_step_hook = load_function(args.custom_megatron_before_train_step_hook_path)
-        custom_before_train_step_hook(args, None, None, model, optimizer, None)
-
-    forward_backward_func = get_forward_backward_func()
-    # collect_non_loss_data
-    _ = forward_backward_func(
-        forward_step_func=warmp_forward_step,
-        data_iterator=[[None]] * len(model),
-        model=model,
-        num_microbatches=num_microbatches,
-        seq_length=args.seq_length,
-        micro_batch_size=args.micro_batch_size,
-    )
-
-    # Set grad to zero.
-    for model_chunk in model:
-        model_chunk.zero_grad_buffer()
-    optimizer.zero_grad()
 
 
 def enable_forward_pre_hook(model_chunks):
