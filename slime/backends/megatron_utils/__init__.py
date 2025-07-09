@@ -15,7 +15,7 @@ from .data import (
 )
 from .initialize import get_gloo_group, init
 from .loss import compute_advantages_and_returns, get_log_probs_and_entropy, loss_function
-from .model import forward_only, initialize_model_and_optimizer, save, train, warmup
+from .model import forward_only, initialize_model_and_optimizer, save, train
 
 logging.getLogger().setLevel(logging.WARNING)
 
@@ -42,7 +42,6 @@ __all__ = [
     "forward_only",
     "train",
     "save",
-    "warmup",
     "initialize_model_and_optimizer",
     "_vocab_size_with_padding",
 ]

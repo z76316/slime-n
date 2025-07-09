@@ -337,7 +337,10 @@ def should_disable_forward_pre_hook(args):
     return not args.use_custom_fsdp and args.use_distributed_optimizer and args.overlap_param_gather
 
 
-def setup_before_train(args, model, optimizer):
+def train(rollout_id, model, optimizer, opt_param_scheduler, data_iterator, num_microbatches):
+    """Training function: run train_step desired number of times."""
+    args = get_args()
+
     # Turn on training mode which enables dropout.
     for model_module in model:
         model_module.train()
@@ -364,6 +367,8 @@ def setup_before_train(args, model, optimizer):
             config.param_sync_func = config.param_sync_func[0]
     config.finalize_model_grads_func = finalize_model_grads
 
+    pre_hook_enabled = False
+
     if args.manual_gc:
         # Disable the default garbage collector and perform the collection manually.
         # This is to align the timing of garbage collection across ranks.
@@ -374,24 +379,13 @@ def setup_before_train(args, model, optimizer):
     # Disable forward pre-hook to start training to ensure that errors in checkpoint loading
     # or random initialization don't propagate to all ranks in first all-gather (which is a
     # no-op if things work correctly).
-    param_sync_func = None
     if should_disable_forward_pre_hook(args):
         disable_forward_pre_hook(model, param_sync=False)
         # Also remove param_sync_func temporarily so that sync calls made in
         # `forward_backward_func` are no-ops.
         param_sync_func = config.param_sync_func
         config.param_sync_func = None
-
-    return param_sync_func
-
-
-def train(rollout_id, model, optimizer, opt_param_scheduler, data_iterator, num_microbatches):
-    """Training function: run train_step desired number of times."""
-    args = get_args()
-
-    pre_hook_enabled = False
-    config = get_model_config(model[0])
-    param_sync_func = setup_before_train(args, model, optimizer)
+        pre_hook_enabled = False
 
     num_steps_per_rollout = args.rollout_batch_size * args.n_samples_per_prompt // args.global_batch_size
 
