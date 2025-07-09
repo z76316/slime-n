@@ -5,6 +5,7 @@ import torch.distributed as dist
 from megatron.core import mpu
 from megatron.core.transformer.transformer_layer import get_transformer_layer_offset
 from slime.utils.types import ParamInfo
+from .initialize import get_gloo_group
 
 
 def all_gather_param(name, param):
@@ -164,6 +165,7 @@ def get_param_infos(args, model) -> list[ParamInfo]:
     dist.all_gather_object(
         obj=param_infos,
         object_list=all_param_info_list,
+        group=get_gloo_group(),
     )
     for i, param_info in enumerate(param_infos):
         for infos in all_param_info_list:

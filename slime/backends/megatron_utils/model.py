@@ -4,8 +4,6 @@ import math
 from functools import partial
 
 import torch
-import torch.distributed
-import wandb
 from megatron.core import mpu
 from megatron.core.distributed import DistributedDataParallel as DDP
 from megatron.core.distributed import finalize_model_grads
@@ -17,6 +15,7 @@ from megatron.core.utils import get_model_config
 from megatron.training.global_vars import get_args
 from megatron.training.training import get_model
 
+import wandb
 
 from .checkpoint import load_checkpoint, save_checkpoint
 from .data import get_batch, set_local_storage
@@ -174,25 +173,24 @@ def forward_only(args, model, data_iterator, num_microbatches, store_prefix=""):
         custom_before_log_prob_hook = load_function(args.custom_megatron_before_log_prob_hook_path)
         custom_before_log_prob_hook(args, model, store_prefix)
 
-    with torch.no_grad():
-        forward_backward_func = get_forward_backward_func()
-        # Don't care about timing during evaluation
-        config.timers = None
-        # collect_non_loss_data
-        forward_data_store = forward_backward_func(
-            forward_step_func=forward_step,
-            data_iterator=data_iterator,
-            model=model,
-            num_microbatches=num_microbatches,
-            seq_length=args.seq_length,
-            micro_batch_size=args.ref_micro_batch_size,
-            forward_only=True,
-            collect_non_loss_data=True,
-        )
+    forward_backward_func = get_forward_backward_func()
+    # Don't care about timing during evaluation
+    config.timers = None
+    # collect_non_loss_data
+    forward_data_store = forward_backward_func(
+        forward_step_func=forward_step,
+        data_iterator=data_iterator,
+        model=model,
+        num_microbatches=num_microbatches,
+        seq_length=args.seq_length,
+        micro_batch_size=args.ref_micro_batch_size,
+        forward_only=True,
+        collect_non_loss_data=True,
+    )
 
-        # Empty unused memory
-        if args.empty_unused_memory_level >= 1:
-            torch.cuda.empty_cache()
+    # Empty unused memory
+    if args.empty_unused_memory_level >= 1:
+        torch.cuda.empty_cache()
 
     # Move model back to the train mode.
     for model_module in model:
