@@ -74,21 +74,26 @@ async def generate(args, sample: Sample, sampling_params) -> Sample:
         response_token_ids = state.tokenizer(sample.response, add_special_tokens=False)["input_ids"]
         sampling_params["max_new_tokens"] -= len(response_token_ids)
 
-    if sampling_params["max_new_tokens"] > 0:
-        # Handle partial rollout samples: continue generation from existing response
-        input_text = sample.prompt + sample.response
+    assert (
+        sampling_params["max_new_tokens"] >= 0
+    ), f"max_new_tokens: {sampling_params['max_new_tokens']} should not be less than 0"
+    if sampling_params["max_new_tokens"] == 0:
+        return sample
 
-        payload = {
-            "text": input_text,
-            "sampling_params": sampling_params,
-        }
+    # Handle partial rollout samples: continue generation from existing response
+    input_text = sample.prompt + sample.response
 
-        output = await post(url, payload, use_http2=args.use_http2)
-        sample.response += output["text"]
+    payload = {
+        "text": input_text,
+        "sampling_params": sampling_params,
+    }
 
-        if output["meta_info"]["finish_reason"]["type"] == "abort":
-            sample.status = Sample.Status.ABORTED
-            return sample
+    output = await post(url, payload, use_http2=args.use_http2)
+    sample.response += output["text"]
+
+    if output["meta_info"]["finish_reason"]["type"] == "abort":
+        sample.status = Sample.Status.ABORTED
+        return sample
 
     prompt_tokens_ids = state.tokenizer(sample.prompt, add_special_tokens=False)["input_ids"]
     response_token_ids = state.tokenizer(sample.response, add_special_tokens=False)["input_ids"]
@@ -144,7 +149,7 @@ async def generate_and_rm_group(args, group: list[Sample], sampling_params: dict
         return group
 
     group = await asyncio.gather(
-        *[generate_and_rm(args, sample, sampling_params, evaluation=evaluation) for sample in group]
+        *[generate_and_rm(args, sample, sampling_params.copy(), evaluation=evaluation) for sample in group]
     )
 
     # for the rm that need the whole group, we will not do the rm here
