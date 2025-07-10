@@ -27,7 +27,9 @@ def compute_approx_kl(
     if kl_loss_type == "kl":
         return log_ratio
     elif kl_loss_type == "k2":
-        return log_ratio**2 / 2.0
+        log_ratio = log_probs.float() - log_probs_base.float()
+        log_ratio = log_ratio**2 / 2.0
+        return log_ratio
     elif kl_loss_type == "k3":
         log_ratio = -log_ratio
         log_ratio = log_ratio.exp() - 1 - log_ratio
