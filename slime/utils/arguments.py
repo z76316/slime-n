@@ -1,4 +1,5 @@
 import os
+from transformers import AutoConfig
 
 from slime.backends.megatron_utils import _vocab_size_with_padding
 from slime.backends.megatron_utils import parse_args as megatron_parse_args
@@ -943,6 +944,7 @@ def parse_args(add_custom_arguments=None):
     args.max_position_embeddings = args.seq_length
 
     megatron_validate_args(args)
+    hf_validate_args(args)
 
     # always use varlen
     args.variable_seq_lengths = True
@@ -956,3 +958,23 @@ def parse_args(add_custom_arguments=None):
     sglang_validate_args(args)
 
     return args
+
+
+def hf_validate_args(args):
+    hf_config = AutoConfig.from_pretrained(args.hf_checkpoint, trust_remote_code=True)
+
+    equal = lambda x, y: x == y
+
+    for hf_config_name, megatron_config_name, compare_fn in [
+        ("hidden_size", "hidden_size", equal),
+        ("num_attention_heads", "num_attention_heads", equal),
+        ("num_hidden_layers", "num_layers", equal),
+        ("intermediate_size", "ffn_hidden_size", equal),
+        ("tie_word_embeddings", "untie_embeddings_and_output_weights", lambda x, y: not x == y),
+        ("rms_norm_eps", "norm_epsilon", equal),
+    ]:
+        if hasattr(hf_config, hf_config_name):
+            assert compare_fn(getattr(hf_config, hf_config_name), getattr(args, megatron_config_name)), (
+                f"{hf_config_name} in hf config {getattr(hf_config, hf_config_name)} is not equal to "
+                f"{megatron_config_name} {getattr(args, megatron_config_name)}, please check the config."
+            )
