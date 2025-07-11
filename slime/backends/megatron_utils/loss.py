@@ -10,9 +10,10 @@ from slime.utils.ppo_utils import (
     compute_log_probs,
     compute_policy_loss,
     get_grpo_returns,
-    get_reinforce_plus_plus_advantages,
+    get_reinforce_plus_plus_returns,
     get_reinforce_plus_plus_baseline_advantages,
 )
+from slime.utils.distributed_utils import distributed_masked_whiten
 
 from .cp_utils import get_logits_and_tokens_offset_with_cp, get_sum_of_sample_mean
 from .data import get_local_storage, set_local_storage
@@ -151,7 +152,7 @@ def compute_advantages_and_returns(args):
         advantages = [r for r in returns]
 
     elif args.advantage_estimator == "reinforce_plus_plus":
-        advantages, returns = get_reinforce_plus_plus_advantages(
+        returns = get_reinforce_plus_plus_returns(
             rewards=rewards,
             kl=kl,
             loss_masks=loss_masks,
@@ -159,13 +160,13 @@ def compute_advantages_and_returns(args):
             kl_coef=args.kl_coef,
             gamma=args.gamma,
         )
+        advantages = [r for r in returns]
 
     elif args.advantage_estimator == "reinforce_plus_plus_baseline":
         advantages = get_reinforce_plus_plus_baseline_advantages(
             rewards=rewards,
             kl=kl,
             loss_masks=loss_masks,
-            response_lengths=response_lengths,
             kl_coef=args.kl_coef,
         )
         returns = advantages
@@ -175,7 +176,10 @@ def compute_advantages_and_returns(args):
 
     # TODO: OpenRLHF always does advantages normalization but veRL doesn't seem to do it.
     if args.normalize_advantages:
-        raise NotImplementedError()
+        all_advs = torch.cat(advantages)
+        all_masks = torch.cat(loss_masks)
+        whitened_advs_flat = distributed_masked_whiten(all_advs, all_masks, shift_mean=True)
+        advantages = list(torch.split(whitened_advs_flat, response_lengths))
 
     set_local_storage("advantages", advantages)
     set_local_storage("returns", returns)

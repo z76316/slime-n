@@ -5,7 +5,7 @@ from typing import Optional, List
 import torch
 import torch.distributed as dist
 
-from slime.utils.distributed_utils import distributed_masked_whiten
+from megatron.core import mpu
 
 
 @torch.compile(dynamic=True)
@@ -127,33 +127,33 @@ def get_grpo_returns(
     return returns
 
 
-def get_reinforce_plus_plus_advantages(
+def get_reinforce_plus_plus_returns(
     rewards: torch.Tensor,
     kl: List[torch.Tensor],
-    loss_masks: Optional[List[torch.Tensor]],
+    loss_masks: List[torch.Tensor],
     response_lengths: List[int],
     kl_coef: float,
     gamma: float,
-) -> (List[torch.Tensor], List[torch.Tensor]):
+) -> List[torch.Tensor]:
     """
-    Calculates discounted returns and whitened advantages for REINFORCE++ (https://arxiv.org/pdf/2501.03262).
+    Calculates discounted returns for REINFORCE++ (https://arxiv.org/pdf/2501.03262).
 
     Args:
         rewards (Tensor): A tensor of scalar rewards for each sequence. Shape: (batch_size,).
         kl (List[Tensor]): A list of per-token KL divergence tensors.
-        loss_masks (Optional[List[Tensor]]): Loss masks for whitening and identifying the last token.
+        loss_masks (List[Tensor]): Loss masks for whitening and identifying the last token.
         response_lengths (List[int]): Sequence lengths for splitting.
         kl_coef (float): Coefficient for the KL penalty.
         gamma (float): The discount factor.
 
     Returns:
-        A tuple of (advantages, returns):
-        - advantages (List[Tensor]): The final, whitened advantages.
-        - returns (List[Tensor]): The original, unwhitened discounted returns.
+        List[Tensor]: A list of tensors, where each tensor contains the unwhitened
+                      discounted returns (G_t) for a sequence segment on the current GPU.
     """
-    if loss_masks is None:
-        # Assume the entire response is used for loss calculation.
-        loss_masks = [torch.ones(length, device=kl[0].device, dtype=torch.long) for length in response_lengths]
+    # prepare for context parallelism
+    cp_size = mpu.get_context_parallel_world_size()
+    cp_rank = mpu.get_context_parallel_rank()
+    is_context_parallel = cp_size > 1
 
     # token-level rewards (final_task_reward + per_token_kl_penalty).
     token_level_rewards = []
@@ -166,70 +166,56 @@ def get_reinforce_plus_plus_advantages(
         r[last_response_idx] += rewards[i]
         token_level_rewards.append(r)
 
-    # Calculate discounted returns per sequence
+    # Calculate discounted returns per sequence with CP support
     returns = []
-    for r_i in token_level_rewards:
-        seq_len = len(r_i)
+    for r_i, length_i in zip(token_level_rewards, response_lengths):
+
+        next_g = torch.tensor(0.0, device=r_i.device, dtype=r_i.dtype)
+        if is_context_parallel and cp_rank < cp_size - 1:
+            src_rank = mpu.get_context_parallel_src_rank()
+            torch.distributed.recv(next_g, src=src_rank, group=mpu.get_context_parallel_group())
+
         returns_i = torch.zeros_like(r_i)
-        running_return = 0.0
-        for t in reversed(range(seq_len)):
+        running_return = next_g
+
+        for t in reversed(range(length_i)):
             # G_t = r_t + gamma * G_{t+1}
             running_return = r_i[t] + gamma * running_return
             returns_i[t] = running_return
+        
+        if is_context_parallel and cp_rank > 0:
+            dest_rank = mpu.get_context_parallel_dest_rank()
+            torch.distributed.send(returns_i[0], dst=dest_rank, group=mpu.get_context_parallel_group())
+
         returns.append(returns_i)
 
-    all_returns = torch.cat(returns)
-    all_masks = torch.cat(loss_masks)
-
-    whitened_advs_flat = distributed_masked_whiten(all_returns, all_masks, shift_mean=True)
-    advantages = list(torch.split(whitened_advs_flat, response_lengths))
-
-    return advantages, returns
+    return returns
 
 def get_reinforce_plus_plus_baseline_advantages(
     rewards: torch.Tensor,
     kl: List[torch.Tensor],
-    loss_masks: Optional[List[torch.Tensor]],
-    response_lengths: List[int],
+    loss_masks: List[torch.Tensor],
     kl_coef: float,
 ) -> List[torch.Tensor]:
     """
-    Calculates the final advantages for the REINFORCE++-baseline algorithm.
-
-    This process involves two main steps:
-    1. Broadcasting the scalar (reward - group_baseline) to each token.
-    2. Applying a *distributed* global whitening (normalization) across all 
-       advantages in the data-parallel group.
+    Calculates the unwhitened advantages for the REINFORCE++-baseline algorithm.
+    Broadcasting the scalar (reward - group_baseline) to each token.
 
     Args:
         rewards (Tensor): A tensor of scalar rewards, where the group-wise
                                 baseline has already been subtracted.
         kl (list[Tensor]): A list of per-token KL divergence tensors. Used to
                                  get the shape for broadcasting.
-        loss_masks (list[Tensor] | None): A list of per-token loss masks. If None,
-                                          it's assumed all tokens are active.
-        response_lengths (list[int]): A list of sequence lengths, required for
-                                      splitting the whitened tensor back.
+        loss_masks (list[Tensor]): A list of per-token loss masks.
+        kl_coef (float): Coefficient for the KL penalty.
 
     Returns:
-        list[Tensor]: A list of tensors containing the final, whitened advantages.
+        list[Tensor]: A list of tensors containing the unwhitened advantages.
     """
     # Broadcast to get unwhitened advantages
     unwhitened_advantages = [
         torch.ones_like(kl_tensor) * reward_val - kl_coef * kl_tensor
         for kl_tensor, reward_val in zip(kl, rewards)
     ]
-    # Concatenate tensors for a global operation
-    if loss_masks is None:
-        loss_masks = [
-            torch.ones_like(adv) for adv in unwhitened_advantages
-        ]
-
-    all_advs = torch.cat(unwhitened_advantages)
-    all_masks = torch.cat(loss_masks)
     
-    whitened_advs_flat = distributed_masked_whiten(all_advs, all_masks, shift_mean=True)
-    
-    advantages = list(torch.split(whitened_advs_flat, response_lengths))
-    
-    return advantages
+    return unwhitened_advantages

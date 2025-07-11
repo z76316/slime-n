@@ -853,6 +853,12 @@ def parse_args(add_custom_arguments=None):
 
     assert not (args.kl_coef != 0 and args.kl_loss_coef != 0), "Only one of kl_coef and kl_loss_coef can be set"
 
+    if args.advantage_estimator in ["reinforce_plus_plus", "reinforce_plus_plus_baseline"]:
+        assert args.normalize_advantages, (
+            "The 'reinforce_plus_plus' and 'reinforce_plus_plus_baseline' advantage estimators "
+            "require advantage normalization. Please add `--normalize-advantages` to your command."
+        )
+
     if args.use_dynamic_batch_size:
         assert args.max_tokens_per_gpu is not None, "max_tokens_per_gpu must be set when use_dynamic_batch_size is set"
         if args.log_probs_max_tokens_per_gpu is None:
