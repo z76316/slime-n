@@ -10,7 +10,6 @@ from slime.utils.ppo_utils import (
     compute_log_probs,
     compute_policy_loss,
     get_grpo_returns,
-    get_reinforce_plus_plus_returns,
     get_reinforce_plus_plus_baseline_advantages,
 )
 from slime.utils.distributed_utils import distributed_masked_whiten
@@ -149,17 +148,6 @@ def compute_advantages_and_returns(args):
     if args.advantage_estimator == "grpo":
         returns = get_grpo_returns(rewards, kl)
         # TODO: is the copy necessary?
-        advantages = [r for r in returns]
-
-    elif args.advantage_estimator == "reinforce_plus_plus":
-        returns = get_reinforce_plus_plus_returns(
-            rewards=rewards,
-            kl=kl,
-            loss_masks=loss_masks,
-            response_lengths=response_lengths,
-            kl_coef=args.kl_coef,
-            gamma=args.gamma,
-        )
         advantages = [r for r in returns]
 
     elif args.advantage_estimator == "reinforce_plus_plus_baseline":

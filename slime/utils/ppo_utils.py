@@ -5,8 +5,6 @@ from typing import Optional, List
 import torch
 import torch.distributed as dist
 
-from megatron.core import mpu
-
 
 @torch.compile(dynamic=True)
 def compute_approx_kl(
@@ -126,70 +124,6 @@ def get_grpo_returns(
         returns.append(torch.ones_like(kl[i]) * rewards[i])
     return returns
 
-
-def get_reinforce_plus_plus_returns(
-    rewards: torch.Tensor,
-    kl: List[torch.Tensor],
-    loss_masks: List[torch.Tensor],
-    response_lengths: List[int],
-    kl_coef: float,
-    gamma: float,
-) -> List[torch.Tensor]:
-    """
-    Calculates discounted returns for REINFORCE++ (https://arxiv.org/pdf/2501.03262).
-
-    Args:
-        rewards (Tensor): A tensor of scalar rewards for each sequence. Shape: (batch_size,).
-        kl (List[Tensor]): A list of per-token KL divergence tensors.
-        loss_masks (List[Tensor]): Loss masks for whitening and identifying the last token.
-        response_lengths (List[int]): Sequence lengths for splitting.
-        kl_coef (float): Coefficient for the KL penalty.
-        gamma (float): The discount factor.
-
-    Returns:
-        List[Tensor]: A list of tensors, where each tensor contains the unwhitened
-                      discounted returns (G_t) for a sequence segment on the current GPU.
-    """
-    # prepare for context parallelism
-    cp_size = mpu.get_context_parallel_world_size()
-    cp_rank = mpu.get_context_parallel_rank()
-    is_context_parallel = cp_size > 1
-
-    # token-level rewards (final_task_reward + per_token_kl_penalty).
-    token_level_rewards = []
-    for i in range(len(rewards)):
-        r = -kl_coef * kl[i]
-        assert loss_masks[i].sum() > 0, f"Sequence at index {i} is fully masked..."
-
-        # Find the index of the last valid token to add the final task reward.
-        last_response_idx = loss_masks[i].nonzero(as_tuple=True)[0][-1]
-        r[last_response_idx] += rewards[i]
-        token_level_rewards.append(r)
-
-    # Calculate discounted returns per sequence with CP support
-    returns = []
-    for r_i, length_i in zip(token_level_rewards, response_lengths):
-
-        next_g = torch.tensor(0.0, device=r_i.device, dtype=r_i.dtype)
-        if is_context_parallel and cp_rank < cp_size - 1:
-            src_rank = mpu.get_context_parallel_src_rank()
-            torch.distributed.recv(next_g, src=src_rank, group=mpu.get_context_parallel_group())
-
-        returns_i = torch.zeros_like(r_i)
-        running_return = next_g
-
-        for t in reversed(range(length_i)):
-            # G_t = r_t + gamma * G_{t+1}
-            running_return = r_i[t] + gamma * running_return
-            returns_i[t] = running_return
-        
-        if is_context_parallel and cp_rank > 0:
-            dest_rank = mpu.get_context_parallel_dest_rank()
-            torch.distributed.send(returns_i[0], dst=dest_rank, group=mpu.get_context_parallel_group())
-
-        returns.append(returns_i)
-
-    return returns
 
 def get_reinforce_plus_plus_baseline_advantages(
     rewards: torch.Tensor,
