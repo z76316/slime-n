@@ -1,5 +1,7 @@
 # Example: Qwen3-4B-Base with OpenHermes-2.5
 
+[中文版](../zh/sft.md)
+
 ## Environment Preparation
 
 First, we need to create a mirror environment and convert the `Qwen3-4B-Base` model by following the [Example: Qwen3-4B Model](./models/qwen3-4B.md).
