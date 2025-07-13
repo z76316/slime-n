@@ -122,7 +122,6 @@ MISC_ARGS=(
 
 # launch the master node of ray in container
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
-export MASTER_PORT=${MASTER_PORT:-"12345"}
 ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 8 --disable-usage-stats
 
 # Build the runtime environment JSON with proper variable substitution

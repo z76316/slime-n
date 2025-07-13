@@ -12,6 +12,17 @@ pkill -9 python
 
 set -ex
 
+# if base folder not set raise error
+if [ -z "${BASE_FOLDER}" ]; then
+  echo "BASE_FOLDER is not set. Please set it to the base directory of your checkpoints."
+  exit 1
+fi
+
+if [ -z "${MASTER_ADDR}" ]; then
+  echo "MASTER_ADDR is not set. Please set it to the master node address."
+  exit 1
+fi
+
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=16
 
@@ -24,19 +35,19 @@ fi
 echo "HAS_NVLINK: $HAS_NVLINK (detected $NVLINK_COUNT NVLink references)"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-source "${SCRIPT_DIR}/models/qwen3-4B.sh"
+source "${SCRIPT_DIR}/models/qwen3-235B-A22B.sh"
 
 CKPT_ARGS=(
-   --hf-checkpoint /root/Qwen3-4B-Base/
-   --ref-load /root/Qwen3-4B-Base_torch_dist
-   --load /root/Qwen3-4B-Base_slime/
-   --save /root/Qwen3-4B-Base_slime/
+   --hf-checkpoint ${BASE_FOLDER}/Qwen3-235B-A22B
+   --ref-load ${BASE_FOLDER}/Qwen3-235B-A22B_torch_dist
+   --load ${BASE_FOLDER}/Qwen3-235B-A22B_slime/
+   --save ${BASE_FOLDER}/Qwen3-235B-A22B_slime/
    --save-interval 1000
 )
 
 SFT_ARGS=(
    --rollout-function-path slime.rollout.sft_example.generate_rollout
-   --prompt-data /root/openhermes2_5.parquet
+   --prompt-data ${BASE_FOLDER}/openhermes2_5.parquet
    --input-key messages
    --rollout-shuffle
    --num-epoch 3
@@ -50,11 +61,11 @@ SFT_ARGS=(
 )
 
 PERF_ARGS=(
-   --tensor-model-parallel-size 1
+   --tensor-model-parallel-size 4
    --sequence-parallel
    --pipeline-model-parallel-size 1
    --context-parallel-size 1
-   --expert-model-parallel-size 1
+   --expert-model-parallel-size 32
    --expert-tensor-parallel-size 1
 
    --recompute-granularity full
@@ -75,14 +86,17 @@ OPTIMIZER_ARGS=(
    --lr-warmup-fraction 0.9
    --weight-decay 0.1
    --adam-beta1 0.9
-   --adam-beta2 0.95
+   --adam-beta2 0.98
+
+   --optimizer-cpu-offload
+   --overlap-cpu-optimizer-d2h-h2d
+   --use-precision-aware-optimizer
 )
 
 WANDB_ARGS=(
    # --use-wandb
    # --wandb-project slime-dev
-   # --wandb-group qwen3-4B-base-sft
-   # --wandb-key ${WANDB_KEY}
+   # --wandb-group qwen3-235B-sft
 )
 
 MISC_ARGS=(
@@ -97,9 +111,17 @@ MISC_ARGS=(
 )
 
 # launch the master node of ray in container
-export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 export no_proxy="127.0.0.1,${MASTER_ADDR}"
 ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 8 --disable-usage-stats
+for WORKER_IP in $(awk '{print $1}' /root/mpi_rack_hostfile); do
+  if [[ "$WORKER_IP" == "$MLP_WORKER_0_HOST" ]]; then
+    continue
+  fi
+  echo "Starting Ray worker on ${WORKER_IP}"
+  ssh root@"${WORKER_IP}" \
+    "pkill -9 sglang ; ray stop --force ; pkill -9 python ; ray start --address=${MASTER_ADDR}:6379 --num-gpus 8 --node-ip-address ${WORKER_IP} --disable-usage-stats" &
+done
+wait
 
 
 # Build the runtime environment JSON with proper variable substitution
@@ -108,13 +130,15 @@ RUNTIME_ENV_JSON="{
     \"PYTHONPATH\": \"/root/Megatron-LM/\",
     \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
     \"NCCL_NVLS_ENABLE\": \"${HAS_NVLINK}\"
+    \"no_proxy\": \"${no_proxy}\",
+    \"MASTER_ADDR\": \"${MASTER_ADDR}\"
   }
 }"
 
 ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
    -- python3 train_async.py \
-   --actor-num-nodes 1 \
+   --actor-num-nodes 4 \
    --actor-num-gpus-per-node 8 \
    ${MODEL_ARGS[@]} \
    ${CKPT_ARGS[@]} \
