@@ -165,9 +165,30 @@ def compute_advantages_and_returns(args):
     # TODO: OpenRLHF always does advantages normalization but veRL doesn't seem to do it.
     if args.normalize_advantages:
         all_advs = torch.cat(advantages)
-        all_masks = torch.cat(loss_masks)
+        cp_size = mpu.get_context_parallel_world_size()
+        if cp_size == 1:
+            all_masks = torch.cat(loss_masks)
+        else:
+            mask_chunks = []
+            for i in range(len(loss_masks)):
+                full_mask = loss_masks[i]
+                total_len, response_len, prompt_len = total_lengths[i], response_lengths[i], total_lengths[i] - response_lengths[i]
+
+                _, _, _, my_offsets = get_logits_and_tokens_offset_with_cp(total_len, response_len)
+                
+                s_start, e_start = my_offsets[0][0] - prompt_len, my_offsets[0][1] - prompt_len
+                s_end, e_end = my_offsets[1][0] - prompt_len, my_offsets[1][1] - prompt_len
+                
+                mask_chunk = torch.cat([full_mask[s_start:e_start], full_mask[s_end:e_end]])
+                mask_chunks.append(mask_chunk)
+            all_masks = torch.cat(mask_chunks)
+
+        assert all_advs.size() == all_masks.size(), \
+            f"Shape mismatch before whitening: advantages {all_advs.size()}, masks {all_masks.size()}"
+
         whitened_advs_flat = distributed_masked_whiten(all_advs, all_masks, shift_mean=True)
-        advantages = list(torch.split(whitened_advs_flat, response_lengths))
+        chunk_lengths = [chunk.size(0) for chunk in advantages]
+        advantages = list(torch.split(whitened_advs_flat, chunk_lengths))
 
     set_local_storage("advantages", advantages)
     set_local_storage("returns", returns)
