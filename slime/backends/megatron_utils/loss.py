@@ -120,6 +120,7 @@ def compute_advantages_and_returns(args):
     values: Union[None, list[torch.Tensor]] = get_local_storage("values")
     response_lengths: list[int] = get_local_storage("response_lengths")
     loss_masks: list[torch.Tensor] = get_local_storage("loss_masks")
+    total_lengths: list[int] = get_local_storage("total_lengths")
 
     if log_probs is None:
         return
