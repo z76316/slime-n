@@ -5,6 +5,7 @@ from slime.utils.arguments import parse_args
 
 
 def train(args):
+    assert not args.colocate, "Colocation is not supported for async training."
     # allocate the GPUs
     pgs = create_placement_groups(args)
 
@@ -35,25 +36,23 @@ def train(args):
     # initialize the connection for weight update during training
     ray.get(actor_model.async_init_weight_update_connections(rollout_generator))
 
-    if args.offload:
-        ray.get(rollout_generator.async_onload())
-
     # always update weight first so that sglang has the loaded weights from training.
     ray.get(actor_model.async_update_weights())
 
-    # train loop.
-    # note that for async training, one can change the position of the sync operation(ray.get).
+    # async train loop.
+    generation_handles = rollout_generator.async_generate(args.start_rollout_id)
     for rollout_id in range(args.start_rollout_id, args.num_rollout):
-        if args.eval_interval is not None and rollout_id == 0:
-            ray.get(rollout_generator.async_generate(rollout_id, evaluation=True))
-            ray.get(actor_model.async_eval(rollout_id))
+        # Sync the last generation
+        ray.get(generation_handles)
 
-        ray.get(rollout_generator.async_generate(rollout_id))
+        # This is a synchronous call to ensure that the rollout data is ready
+        actor_model.get_rollout_data(rollout_id)
 
-        if args.offload:
-            ray.get(rollout_generator.async_offload())
+        # Start the next rollout early.
+        if rollout_id + 1 < args.num_rollout:
+            generation_handles = rollout_generator.async_generate(rollout_id + 1)
 
-        ray.get(actor_model.async_train(rollout_id))
+        ray.get(actor_model.async_train(rollout_id, with_data_fetching=False))
 
         if args.save_interval is not None and (
             (rollout_id + 1) % args.save_interval == 0
@@ -63,11 +62,10 @@ def train(args):
             if args.rollout_global_dataset:
                 ray.get(rollout_generator.data_buffer.save.remote(rollout_id))
 
-        if args.offload:
-            ray.get(actor_model.async_offload())
-            ray.get(rollout_generator.async_onload())
-
-        ray.get(actor_model.async_update_weights())
+        if (rollout_id + 1) % args.update_weights_interval == 0:
+            # sync generate before update weights to prevent update weight in the middle of generation
+            ray.get(generation_handles)
+            ray.get(actor_model.async_update_weights())
 
         if args.eval_interval is not None and (
             (rollout_id + 1) % args.eval_interval == 0

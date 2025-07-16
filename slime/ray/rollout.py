@@ -93,7 +93,7 @@ def create_rollout_engines(args, pg):
     # 2. nccl port
     # 3. dist_init_addr port
     # 4. other ports for dp_attention, which is of size 4 + dp_size
-    num_engines_per_node = max(1, 8 // args.rollout_num_gpus_per_engine)
+    num_engines_per_node = max(1, min(8, args.rollout_num_gpus) // args.rollout_num_gpus_per_engine)
     addr_and_ports = [{} for _ in range(num_engines)]
     for rank, engine in enumerate(rollout_engines):
         if rank % num_engines_per_node != 0:
@@ -142,10 +142,10 @@ def create_rollout_engines(args, pg):
             assert key in addr_and_ports[i], f"Engine {i} {key} is not set."
         print(f"Ports for engine {i}: {addr_and_ports[i]}")
 
-    # don't ray.get here to overlap train actor init with rollout engine init.
+    # TODO: don't ray.get here to overlap train actor init with rollout engine init.
+    # somehow if we don't sync here, the --debug-rollout-only mode will crash.
     init_handles = [engine.init.remote(**ports) for engine, ports in zip(rollout_engines, addr_and_ports)]
-    if args.offload:
-        ray.get(init_handles)
+    ray.get(init_handles)
 
     return rollout_engines
 

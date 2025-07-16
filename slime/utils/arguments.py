@@ -522,9 +522,9 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
             parser.add_argument(
                 "--kl-loss-type",
                 type=str,
-                choices=["kl", "low_var_kl"],
+                choices=["kl", "k2", "k3", "low_var_kl"],
                 default="kl",
-                help="Choose KL loss type: kl, low_var_kl",
+                help="Choose KL loss type: kl, k2, k3 low_var_kl",
             )
             parser.add_argument(
                 "--advantage-estimator",
@@ -713,7 +713,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 help="URL for the agent rollout buffer",
             )
             parser.add_argument(
-                "--update-rollout-weights-interval",
+                "--update-weights-interval",
                 type=int,
                 default=1,
                 help="Interval for updating the weights of the agent",
@@ -804,6 +804,11 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
 def parse_args(add_custom_arguments=None):
     add_slime_arguments = get_slime_extra_args_provider(add_custom_arguments)
     args = megatron_parse_args(extra_args_provider=add_slime_arguments)
+
+    if args.hf_checkpoint:
+        hf_config = AutoConfig.from_pretrained(args.hf_checkpoint, trust_remote_code=True)
+        hf_validate_args(args, hf_config)
+
     args.rank = 0
     args.world_size = args.actor_num_nodes * args.actor_num_gpus_per_node
 
@@ -878,6 +883,11 @@ def parse_args(add_custom_arguments=None):
         args.debug_train_only = True
 
     if args.debug_rollout_only:
+        if args.colocate and args.rollout_num_gpus is None:
+            args.rollout_num_gpus = args.actor_num_gpus_per_node * args.actor_num_nodes
+        else:
+            args.actor_num_gpus_per_node = min(8, args.rollout_num_gpus)
+            args.actor_num_nodes = args.rollout_num_gpus // args.actor_num_gpus_per_node
         args.colocate = False
         args.offload = False
 
@@ -951,7 +961,6 @@ def parse_args(add_custom_arguments=None):
     args.max_position_embeddings = args.seq_length
 
     megatron_validate_args(args)
-    hf_validate_args(args)
 
     # always use varlen
     args.variable_seq_lengths = True
@@ -967,11 +976,8 @@ def parse_args(add_custom_arguments=None):
     return args
 
 
-def hf_validate_args(args):
-    hf_config = AutoConfig.from_pretrained(args.hf_checkpoint, trust_remote_code=True)
-
+def hf_validate_args(args, hf_config):
     equal = lambda x, y: x == y
-
     for hf_config_name, megatron_config_name, compare_fn in [
         ("hidden_size", "hidden_size", equal),
         ("num_attention_heads", "num_attention_heads", equal),

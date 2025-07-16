@@ -1,12 +1,26 @@
-import json
 import random
+
+import pandas as pd
+
 from slime.utils.types import Sample
 
+__all__ = ["Dataset"]
 
-__all__ = ["JsonlDataset"]
+
+# TODO: don't read the whole file into memory.
+def read_file(path):
+    if path.endswith(".jsonl"):
+        df = pd.read_json(path, lines=True)
+    elif path.endswith(".parquet"):
+        df = pd.read_parquet(path)
+    else:
+        raise ValueError(f"Unsupported file format: {path}. Supported formats are .jsonl and .parquet.")
+
+    for _, row in df.iterrows():
+        yield row.to_dict()
 
 
-class JsonlDataset:
+class Dataset:
     def __init__(
         self,
         path,
@@ -18,32 +32,30 @@ class JsonlDataset:
         tool_key=None,
         metadata_key="metadata",
         seed=42,
-        apply_chat_template=False
+        apply_chat_template=False,
     ):
         self.origin_samples = []
-        with open(path) as f:
-            for line in f:
-                data = json.loads(line)
-                prompt = data[prompt_key]
-                if apply_chat_template:
-                    if tool_key is not None:
-                        tools = data[tool_key]
-                    else:
-                        tools = None
-                    prompt = tokenizer.apply_chat_template(prompt, tools, tokenize=False, add_generation_prompt=True)
+        for data in read_file(path):
+            prompt = data[prompt_key]
+            if apply_chat_template:
+                if tool_key is not None:
+                    tools = data[tool_key]
+                else:
+                    tools = None
+                prompt = tokenizer.apply_chat_template(prompt, tools, tokenize=False, add_generation_prompt=True)
 
-                # TODO: this is slow.
-                if max_length is not None:
-                    if len(tokenizer(prompt)["input_ids"]) > max_length:
-                        continue
+            # TODO: this is slow.
+            if max_length is not None:
+                if len(tokenizer(prompt)["input_ids"]) > max_length:
+                    continue
 
-                self.origin_samples.append(
-                    Sample(
-                        prompt=prompt,
-                        label=data[label_key] if label_key is not None else None,
-                        metadata=data.get(metadata_key) or {},
-                    )
+            self.origin_samples.append(
+                Sample(
+                    prompt=prompt,
+                    label=data[label_key] if label_key is not None else None,
+                    metadata=data.get(metadata_key) or {},
                 )
+            )
 
         self.epoch_id = -1
         self.seed = seed

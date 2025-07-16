@@ -1,7 +1,6 @@
 import os
 import socket
 import time
-from contextlib import nullcontext
 from typing import Dict
 
 import ray
@@ -86,14 +85,18 @@ class TrainRayActor(RayActor):
             Timer().start("train_wait")
             return 0
 
-        allocator = CuMemAllocator.get_instance() if self.args.offload else None
-
-        with allocator.use_memory_pool(tag="model") if allocator else nullcontext():
-            (self.model, self.optimizer, self.opt_param_scheduler, loaded_rollout_id) = (
-                megatron_utils.initialize_model_and_optimizer(args, with_optimizer=True)
-            )
-            clear_memory()
-            start_rollout_id = loaded_rollout_id + 1
+        (self.model, self.optimizer, self.opt_param_scheduler, loaded_rollout_id) = (
+            megatron_utils.initialize_model_and_optimizer(args)
+        )
+        clear_memory()
+        loaded_rollout_id, _ = megatron_utils.load_checkpoint(
+            self.model,
+            self.optimizer,
+            self.opt_param_scheduler,
+            checkpointing_context={},
+            skip_load_to_model_and_opt=False,
+        )
+        start_rollout_id = loaded_rollout_id + 1
         self.weights = {"actor": {}}
         self.update_cpu_params_dict(self.weights["actor"])
 
@@ -286,8 +289,6 @@ class TrainRayActor(RayActor):
             megatron_utils.log_perf_data(rollout_id, self.args)
             Timer().start("train_wait")
             return
-
-        print_memory("begin train")
 
         if self.args.offload:
             self.wake_up(("model"))
@@ -590,7 +591,6 @@ class RayTrainGroup:
         num_gpus_per_actor=1,
         resources: Dict[str, float] = None,
         num_resources_per_node: int = None,
-        debug_rollout_only: bool = False,
     ) -> None:
         self._num_nodes = num_nodes
         self._num_gpus_per_node = num_gpus_per_node
@@ -598,8 +598,6 @@ class RayTrainGroup:
         # custom resources, see https://docs.ray.io/en/latest/ray-core/scheduling/resources.html
         self._resources = resources
         self._num_resources_per_node = num_resources_per_node
-
-        self._debug_rollout_only = debug_rollout_only
 
         # Allocate the GPUs for actors w/o instantiating them
         self._allocate_gpus_for_actor(pg, num_gpus_per_actor)

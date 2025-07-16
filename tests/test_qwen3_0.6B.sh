@@ -24,14 +24,11 @@ fi
 echo "HAS_NVLINK: $HAS_NVLINK (detected $NVLINK_COUNT NVLink references)"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-source "${SCRIPT_DIR}/models/glm4-9B.sh"
+source "${SCRIPT_DIR}/../scripts/models/qwen3-0.6B.sh"
 
 CKPT_ARGS=(
-   --hf-checkpoint /root/GLM-Z1-9B-0414/
-   --ref-load /root/GLM-Z1-9B-0414_torch_dist
-   --load /root/GLM-Z1-9B-0414_slime/
-   --save /root/GLM-Z1-9B-0414_slime/
-   --save-interval 20
+   --hf-checkpoint /root/Qwen3-0.6B
+   --ref-load /root/Qwen3-0.6B_torch_dist
 )
 
 ROLLOUT_ARGS=(
@@ -40,32 +37,34 @@ ROLLOUT_ARGS=(
    --label-key label
    --apply-chat-template
    --rollout-shuffle
-
    --rm-type deepscaler
-
    --num-rollout 3000
    --rollout-batch-size 32
    --n-samples-per-prompt 8
    --rollout-max-response-len 8192
    --rollout-temperature 0.8
 
+   --over-sampling-batch-size 64
+   --dynamic-sampling-filter-path slime.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
+   #--partial-rollout
+
    --global-batch-size 256
-   --balance-data
+   #--balance-data
 )
 
 EVAL_ARGS=(
    --eval-interval 20
    --eval-prompt-data aime /root/aime-2024/aime-2024.jsonl
-   --n-samples-per-eval-prompt 16
+   --n-samples-per-eval-prompt 1
    --eval-max-response-len 16384
-   --eval-top-p 0.7
+   --eval-temperature 0
 )
 
 PERF_ARGS=(
-   --tensor-model-parallel-size 2
+   --tensor-model-parallel-size 1
    --sequence-parallel
    --pipeline-model-parallel-size 1
-   --context-parallel-size 2
+   --context-parallel-size 1
    --expert-model-parallel-size 1
    --expert-tensor-parallel-size 1
 
@@ -75,7 +74,7 @@ PERF_ARGS=(
 
    # --micro-batch-size 1
    --use-dynamic-batch-size
-   --max-tokens-per-gpu 4608
+   --max-tokens-per-gpu 9216
 )
 
 GRPO_ARGS=(
@@ -100,13 +99,13 @@ OPTIMIZER_ARGS=(
 
 WANDB_ARGS=(
    #--use-wandb
-   # --wandb-project slime-dev
-   # --wandb-group qwen3-4B-test
-   # --wandb-key ${WANDB_KEY}
+   --wandb-project slime-test
+   --wandb-group test-qwen-3-0.6B
 )
 
 SGLANG_ARGS=(
-   --rollout-num-gpus-per-engine 2
+   --rollout-num-gpus-per-engine 1
+   --sglang-mem-fraction-static 0.7
 )
 
 MISC_ARGS=(
@@ -121,7 +120,6 @@ MISC_ARGS=(
 )
 
 # launch the master node of ray in container
-export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 8 --disable-usage-stats
 
 # Build the runtime environment JSON with proper variable substitution
@@ -134,11 +132,20 @@ RUNTIME_ENV_JSON="{
 }"
 
 ray job submit --address="http://127.0.0.1:8265" \
+<<<<<<< HEAD:scripts/run-qwen3-4B-rf.sh
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
+=======
+   --runtime-env-json='{
+     "env_vars": {
+        "PYTHONPATH": "/root/Megatron-LM",
+        "CUDA_DEVICE_MAX_CONNECTIONS": "1"
+     }
+   }' \
+>>>>>>> origin/main:tests/test_qwen3_0.6B.sh
    -- python3 train.py \
    --actor-num-nodes 1 \
-   --actor-num-gpus-per-node 4 \
-   --rollout-num-gpus 4 \
+   --actor-num-gpus-per-node 1 \
+   --colocate \
    ${MODEL_ARGS[@]} \
    ${CKPT_ARGS[@]} \
    ${ROLLOUT_ARGS[@]} \
