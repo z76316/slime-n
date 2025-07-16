@@ -6,6 +6,7 @@ from typing import Dict
 import ray
 import torch
 import torch.distributed as dist
+from tqdm import tqdm
 
 
 if torch.version.hip:
@@ -446,68 +447,75 @@ class TrainRayActor(RayActor):
         ray.get(self.rollout_engine_lock.release.remote())
 
     def update_weights_from_tensor(self):
-        pp_size = mpu.get_pipeline_model_parallel_world_size()
-        ep_size = mpu.get_expert_model_parallel_world_size()
         rank = dist.get_rank()
         if rank == 0:
             ray.get([engine.reset_prefix_cache.remote() for engine in self.rollout_engines])
         dist.barrier(group=megatron_utils.get_gloo_group())
-        for param_infos in self.param_info_buckets:
-            # init params:
-            params = []
-            for info in param_infos:
-                if dist.get_rank() == info.src_rank:
-                    params.append(
-                        torch.nn.Parameter(self.weights["actor"][info.name].to(device=torch.cuda.current_device()))
-                    )
-                else:
-                    params.append(torch.empty(info.shape, dtype=info.dtype, device=torch.cuda.current_device()))
+        for param_infos in tqdm(self.param_info_buckets, disable=rank != 0, desc="Update weights"):
+            self._update_bucket_weights_from_tensor(param_infos)
 
-            # broadcast params across pp ranks
-            if pp_size > 1:
-                handles = []
-                for info, param in zip(param_infos, params):
-                    if info.src_rank in dist.get_process_group_ranks(mpu.get_pipeline_model_parallel_group()):
-                        handles.append(
-                            torch.distributed.broadcast(
-                                param, src=info.src_rank, group=mpu.get_pipeline_model_parallel_group(), async_op=True
-                            )
-                        )
-                for handle in handles:
-                    handle.wait()
-
-            # broadcast params across ep ranks
-            if ep_size > 1:
-                handles = []
-                for info, param in zip(param_infos, params):
-                    if ".experts." in info.name:
-                        src_rank = (
-                            info.src_rank
-                            if info.src_rank in dist.get_process_group_ranks(mpu.get_expert_model_parallel_group())
-                            else rank
-                        )
-                        handles.append(
-                            torch.distributed.broadcast(
-                                param, src=src_rank, group=mpu.get_expert_model_parallel_group(), async_op=True
-                            )
-                        )
-                for handle in handles:
-                    handle.wait()
-
-            converted_named_tensors = []
-            for info, param in zip(param_infos, params):
-                # set tp attrs
-                for key, value in info.attrs.items():
-                    setattr(param, key, value)
-                # gather param
-                param = update_weight_utils.all_gather_param(info.name, param)
-                param = update_weight_utils.remove_padding(info.name, param, self.vocab_size)
-                converted_named_tensors.extend(
-                    update_weight_utils.convert_to_hf(
-                        self.args, self.model_name, info.name, param, self.quantization_config
+    def _update_bucket_weights_from_tensor(self, param_infos):
+        pp_size = mpu.get_pipeline_model_parallel_world_size()
+        ep_size = mpu.get_expert_model_parallel_world_size()
+        rank = dist.get_rank()
+        # init params:
+        params = []
+        for info in param_infos:
+            if dist.get_rank() == info.src_rank:
+                params.append(
+                    torch.nn.Parameter(
+                        self.weights["actor"][info.name].to(device=torch.cuda.current_device(), non_blocking=True)
                     )
                 )
-            self._update_converted_params_from_tensor(converted_named_tensors)
+            else:
+                params.append(torch.empty(info.shape, dtype=info.dtype, device=torch.cuda.current_device()))
+        torch.cuda.synchronize()
+
+        # broadcast params across pp ranks
+        if pp_size > 1:
+            handles = []
+            for info, param in zip(param_infos, params):
+                if info.src_rank in dist.get_process_group_ranks(mpu.get_pipeline_model_parallel_group()):
+                    handles.append(
+                        torch.distributed.broadcast(
+                            param, src=info.src_rank, group=mpu.get_pipeline_model_parallel_group(), async_op=True
+                        )
+                    )
+            for handle in handles:
+                handle.wait()
+
+        # broadcast params across ep ranks
+        if ep_size > 1:
+            handles = []
+            for info, param in zip(param_infos, params):
+                if ".experts." in info.name:
+                    src_rank = (
+                        info.src_rank
+                        if info.src_rank in dist.get_process_group_ranks(mpu.get_expert_model_parallel_group())
+                        else rank
+                    )
+                    handles.append(
+                        torch.distributed.broadcast(
+                            param, src=src_rank, group=mpu.get_expert_model_parallel_group(), async_op=True
+                        )
+                    )
+            for handle in handles:
+                handle.wait()
+
+        converted_named_tensors = []
+        for info, param in zip(param_infos, params):
+            # set tp attrs
+            for key, value in info.attrs.items():
+                setattr(param, key, value)
+            # gather param
+            param = update_weight_utils.all_gather_param(info.name, param)
+            param = update_weight_utils.remove_padding(info.name, param, self.vocab_size)
+            converted_named_tensors.extend(
+                update_weight_utils.convert_to_hf(
+                    self.args, self.model_name, info.name, param, self.quantization_config
+                )
+            )
+        self._update_converted_params_from_tensor(converted_named_tensors)
 
     def _update_converted_params_from_tensor(self, converted_named_tensors):
         ipc_handle = MultiprocessingSerializer.serialize(converted_named_tensors, output_str=True)
@@ -526,9 +534,6 @@ class TrainRayActor(RayActor):
                 ipc_handles=ipc_handles,
             )
             ray.get(ref)
-
-        converted_named_tensors.clear()
-        torch.cuda.empty_cache()
 
     @timer
     def update_weights(self):
