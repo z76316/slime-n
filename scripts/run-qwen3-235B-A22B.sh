@@ -56,12 +56,12 @@ ROLLOUT_ARGS=(
    --rm-type deepscaler
 
    --num-rollout 3000
-   --rollout-batch-size 32
+   --rollout-batch-size 8
    --n-samples-per-prompt 8
    --rollout-max-response-len 8192
    --rollout-temperature 0.8
 
-   --global-batch-size 256
+   --global-batch-size 64
    --balance-data
 )
 
@@ -76,10 +76,11 @@ EVAL_ARGS=(
 PERF_ARGS=(
    --tensor-model-parallel-size 4
    --sequence-parallel
-   --pipeline-model-parallel-size 1
-   --context-parallel-size 1
-   --expert-model-parallel-size 32
+   --pipeline-model-parallel-size 4
+   --context-parallel-size 2
+   --expert-model-parallel-size 8
    --expert-tensor-parallel-size 1
+   --decoder-last-pipeline-num-layers 22
 
    --recompute-granularity full
    --recompute-method uniform
@@ -87,7 +88,7 @@ PERF_ARGS=(
 
    # --micro-batch-size 1
    --use-dynamic-batch-size
-   --max-tokens-per-gpu 9216
+   --max-tokens-per-gpu 4096
 )
 
 GRPO_ARGS=(
