@@ -1,6 +1,6 @@
 # Adapt from https://github.com/OpenRLHF/OpenRLHF/blob/10c733694ed9fbb78a0a2ff6a05efc7401584d46/openrlhf/models/utils.py
 # and https://github.com/OpenRLHF/OpenRLHF/blob/10c733694ed9fbb78a0a2ff6a05efc7401584d46/openrlhf/trainer/ppo_utils/experience_maker.py
-from typing import Optional
+from typing import Optional, List
 
 import torch
 import torch.distributed as dist
@@ -131,3 +131,33 @@ def get_grpo_returns(
     for i in range(len(rewards)):
         returns.append(torch.ones_like(kl[i]) * rewards[i])
     return returns
+
+
+def get_reinforce_plus_plus_baseline_advantages(
+    rewards: torch.Tensor,
+    kl: List[torch.Tensor],
+    loss_masks: List[torch.Tensor],
+    kl_coef: float,
+) -> List[torch.Tensor]:
+    """
+    Calculates the unwhitened advantages for the REINFORCE++-baseline algorithm.
+    Broadcasting the scalar (reward - group_baseline) to each token.
+
+    Args:
+        rewards (Tensor): A tensor of scalar rewards, where the group-wise
+                                baseline has already been subtracted.
+        kl (list[Tensor]): A list of per-token KL divergence tensors. Used to
+                                 get the shape for broadcasting.
+        loss_masks (list[Tensor]): A list of per-token loss masks.
+        kl_coef (float): Coefficient for the KL penalty.
+
+    Returns:
+        list[Tensor]: A list of tensors containing the unwhitened advantages.
+    """
+    # Broadcast to get unwhitened advantages
+    unwhitened_advantages = [
+        torch.ones_like(kl_tensor) * reward_val - kl_coef * kl_tensor
+        for kl_tensor, reward_val in zip(kl, rewards)
+    ]
+    
+    return unwhitened_advantages

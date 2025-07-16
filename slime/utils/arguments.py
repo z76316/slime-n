@@ -529,7 +529,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
             parser.add_argument(
                 "--advantage-estimator",
                 type=str,
-                choices=["grpo"],
+                choices=["grpo", "reinforce_plus_plus_baseline"],
                 default="grpo",
             )
             parser.add_argument(
@@ -856,6 +856,12 @@ def parse_args(add_custom_arguments=None):
         assert len(args.eval_prompt_data) % 2 == 0, "eval prompt data will need to be in pairs"
 
     assert not (args.kl_coef != 0 and args.kl_loss_coef != 0), "Only one of kl_coef and kl_loss_coef can be set"
+
+    if args.advantage_estimator in ["reinforce_plus_plus_baseline"]:
+        assert args.normalize_advantages, (
+            "The 'reinforce_plus_plus_baseline' advantage estimators "
+            "require advantage normalization. Please add `--normalize-advantages` to your command."
+        )
 
     if args.use_dynamic_batch_size:
         assert args.max_tokens_per_gpu is not None, "max_tokens_per_gpu must be set when use_dynamic_batch_size is set"
