@@ -15,14 +15,6 @@ set -ex
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=16
 
-NVLINK_COUNT=$(nvidia-smi | grep -o "NVLink" | wc -l)
-if [ "$NVLINK_COUNT" -gt 0 ]; then
-    HAS_NVLINK=1
-else
-    HAS_NVLINK=0
-fi
-echo "HAS_NVLINK: $HAS_NVLINK (detected $NVLINK_COUNT NVLink references)"
-
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/../scripts/models/qwen3-0.6B.sh"
 
@@ -122,26 +114,13 @@ MISC_ARGS=(
 # launch the master node of ray in container
 ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 8 --disable-usage-stats
 
-# Build the runtime environment JSON with proper variable substitution
-RUNTIME_ENV_JSON="{
-  \"env_vars\": {
-    \"PYTHONPATH\": \"/root/Megatron-LM/\",
-    \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
-    \"NCCL_NVLS_ENABLE\": \"${HAS_NVLINK}\"
-  }
-}"
-
 ray job submit --address="http://127.0.0.1:8265" \
-<<<<<<< HEAD:scripts/run-qwen3-4B-rf.sh
-   --runtime-env-json="${RUNTIME_ENV_JSON}" \
-=======
    --runtime-env-json='{
      "env_vars": {
         "PYTHONPATH": "/root/Megatron-LM",
         "CUDA_DEVICE_MAX_CONNECTIONS": "1"
      }
    }' \
->>>>>>> origin/main:tests/test_qwen3_0.6B.sh
    -- python3 train.py \
    --actor-num-nodes 1 \
    --actor-num-gpus-per-node 1 \
