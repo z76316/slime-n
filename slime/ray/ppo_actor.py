@@ -544,8 +544,7 @@ class TrainRayActor(RayActor):
 
         if getattr(self.args, "keep_old_actor", False):
             print("update rollout model on cpu using actor model")
-            for cpu_module, src_module in zip(self.old_actor, self.model):
-                cpu_module.load_state_dict(src_module.state_dict(), strict=True)
+            self.update_cpu_params_dict(self.weights["old_actor"])
 
     def load_other_checkpoint(self, model_tag, path):
         old_args = self.args.load, self.args.no_load_optim, self.args.no_load_rng, self.args.finetune
