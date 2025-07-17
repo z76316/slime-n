@@ -3,6 +3,7 @@ from typing import Union
 import torch
 from megatron.core import mpu
 
+from slime.utils.distributed_utils import distributed_masked_whiten
 from slime.utils.misc import load_function
 from slime.utils.ppo_utils import (
     compute_approx_kl,
@@ -10,10 +11,9 @@ from slime.utils.ppo_utils import (
     compute_log_probs,
     compute_policy_loss,
     get_grpo_returns,
-    get_reinforce_plus_plus_returns,
     get_reinforce_plus_plus_baseline_advantages,
+    get_reinforce_plus_plus_returns,
 )
-from slime.utils.distributed_utils import distributed_masked_whiten
 
 from .cp_utils import get_logits_and_tokens_offset_with_cp, get_sum_of_sample_mean
 from .data import get_local_storage, set_local_storage
@@ -186,19 +186,24 @@ def compute_advantages_and_returns(args):
             mask_chunks = []
             for i in range(len(loss_masks)):
                 full_mask = loss_masks[i]
-                total_len, response_len, prompt_len = total_lengths[i], response_lengths[i], total_lengths[i] - response_lengths[i]
+                total_len, response_len, prompt_len = (
+                    total_lengths[i],
+                    response_lengths[i],
+                    total_lengths[i] - response_lengths[i],
+                )
 
                 _, _, _, my_offsets = get_logits_and_tokens_offset_with_cp(total_len, response_len)
-                
+
                 s_start, e_start = my_offsets[0][0] - prompt_len, my_offsets[0][1] - prompt_len
                 s_end, e_end = my_offsets[1][0] - prompt_len, my_offsets[1][1] - prompt_len
-                
+
                 mask_chunk = torch.cat([full_mask[s_start:e_start], full_mask[s_end:e_end]])
                 mask_chunks.append(mask_chunk)
             all_masks = torch.cat(mask_chunks)
 
-        assert all_advs.size() == all_masks.size(), \
-            f"Shape mismatch before whitening: advantages {all_advs.size()}, masks {all_masks.size()}"
+        assert (
+            all_advs.size() == all_masks.size()
+        ), f"Shape mismatch before whitening: advantages {all_advs.size()}, masks {all_masks.size()}"
 
         whitened_advs_flat = distributed_masked_whiten(all_advs, all_masks, shift_mean=True)
         chunk_lengths = [chunk.size(0) for chunk in advantages]
