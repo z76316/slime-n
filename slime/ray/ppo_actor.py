@@ -89,14 +89,6 @@ class TrainRayActor(RayActor):
         (self.model, self.optimizer, self.opt_param_scheduler, loaded_rollout_id) = (
             megatron_utils.initialize_model_and_optimizer(args)
         )
-        clear_memory()
-        loaded_rollout_id, _ = megatron_utils.load_checkpoint(
-            self.model,
-            self.optimizer,
-            self.opt_param_scheduler,
-            checkpointing_context={},
-            skip_load_to_model_and_opt=False,
-        )
         start_rollout_id = loaded_rollout_id + 1
         self.weights = {"actor": {}}
         self.update_cpu_params_dict(self.weights["actor"])
