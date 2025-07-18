@@ -8,6 +8,14 @@
 
 ⚠️ 在做 MoE 模型的 ckpt 转换时，请使用 [Pai-Megatron-Patch](https://github.com/alibaba/Pai-Megatron-Patch)，mbridge 可能会遇到加载问题。
 
+```bash
+git clone --recurse-submodules https://github.com/alibaba/Pai-Megatron-Patch.git
+cd Pai-Megatron-Patch/toolkits/distributed_checkpoints_convertor
+bash scripts/qwen3/run_8xH20.sh A3B /root/Qwen3-30B-A3B /root/Qwen3-30B-A3B_torch_dist_2 false true bf16
+```
+
+[完整指令](https://github.com/alibaba/Pai-Megatron-Patch/blob/main/examples/qwen3/README.md)
+
 ## 执行训练
 
 执行训练：
