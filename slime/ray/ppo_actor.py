@@ -1,7 +1,10 @@
 import abc
 import os
+from datetime import timedelta
 
 import ray
+import torch
+import torch.distributed as dist
 
 from slime.ray.ray_actor import RayActor
 
@@ -24,9 +27,25 @@ class TrainRayActor(RayActor):
         # os.environ["LOCAL_RANK"] = str(ray.get_gpu_ids()[0])
         os.environ["LOCAL_RANK"] = str(ray.get_gpu_ids()[0])
 
-    @abc.abstractmethod
     def init(self, args, role, with_ref=False):
-        raise NotImplementedError
+        self.args = args
+        self.role = role
+        self.with_ref = with_ref
+
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        torch.cuda.set_device(f"cuda:{local_rank}")
+
+        dist.init_process_group(
+            backend=args.distributed_backend,
+            timeout=timedelta(minutes=args.distributed_timeout_minutes),
+        )
+
+        args.rank = dist.get_rank()
+        args.world_size = dist.get_world_size()
+
+        # set current device
+        args.local_rank = args.rank % torch.cuda.device_count()
+        torch.cuda.set_device(f"cuda:{args.local_rank}")
 
     @abc.abstractmethod
     def sleep(self, tags):

@@ -15,8 +15,8 @@ from slime.utils.ppo_utils import (
     get_reinforce_plus_plus_returns,
 )
 
+from ..utils.data import get_local_storage, set_local_storage
 from .cp_utils import get_logits_and_tokens_offset_with_cp, get_sum_of_sample_mean
-from .data import get_local_storage, set_local_storage
 
 
 def calculate_log_probs_and_entropy(logits, tokens, with_entropy: bool = False):

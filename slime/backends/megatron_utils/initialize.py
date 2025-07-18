@@ -1,14 +1,13 @@
-import os
 import random
-from datetime import timedelta
 
 import numpy as np
 import torch
 import torch.distributed as dist
-import wandb
 from megatron.core import mpu, tensor_parallel
 from megatron.core.num_microbatches_calculator import init_num_microbatches_calculator
 from megatron.training.global_vars import _build_tokenizer, set_args
+
+import wandb
 
 GLOO_GROUP = None
 
@@ -50,22 +49,6 @@ def _set_random_seed(
 
 def _initialize_distributed(args, get_embedding_ranks=None, get_position_embedding_ranks=None):
     """Initialize torch.distributed and core model parallel."""
-
-    local_rank = int(os.environ.get("LOCAL_RANK", 0))
-    torch.cuda.set_device(f"cuda:{local_rank}")
-
-    dist.init_process_group(
-        backend=args.distributed_backend,
-        timeout=timedelta(minutes=args.distributed_timeout_minutes),
-    )
-
-    args.rank = dist.get_rank()
-    args.world_size = dist.get_world_size()
-
-    # set current device
-    args.local_rank = args.rank % torch.cuda.device_count()
-    torch.cuda.set_device(f"cuda:{args.local_rank}")
-
     # Set the tensor model-parallel, pipeline model-parallel, and
     # data-parallel communicators.
     mpu.initialize_model_parallel(

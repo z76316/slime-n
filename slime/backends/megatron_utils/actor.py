@@ -20,16 +20,9 @@ from slime.utils.distributed_utils import init_process_group
 from slime.utils.memory_utils import clear_memory, print_memory
 from slime.utils.timer import Timer, timer
 
+from ..utils.data import clear_local_storage, process_rollout_data, set_metadata
 from .checkpoint import load_checkpoint
-from .data import (
-    clear_local_storage,
-    get_data_iterator,
-    log_eval_data,
-    log_perf_data,
-    log_rollout_data,
-    process_rollout_data,
-    set_metadata,
-)
+from .data import get_data_iterator, log_eval_data, log_perf_data, log_rollout_data
 from .initialize import get_gloo_group, init
 from .loss import compute_advantages_and_returns
 from .model import forward_only, initialize_model_and_optimizer, save, train
@@ -44,9 +37,7 @@ from .update_weight_utils import (
 
 class MegatronTrainRayActor(TrainRayActor):
     def init(self, args, role, with_ref=False):
-        self.args = args
-        self.role = role
-        self.with_ref = with_ref
+        super().init(args, role, with_ref)
 
         wandb_run_id = init(args)
         self.args.wandb_run_id = wandb_run_id
@@ -231,7 +222,13 @@ class MegatronTrainRayActor(TrainRayActor):
     def get_rollout_data(self, rollout_id):
         # Fetch data through ray on CPU, not sure if this will be performance bottleneck.
         # Both first pp stage and the last pp stage will recieve the data.
-        process_rollout_data(rollout_id, self.args, self.data_buffer)
+        process_rollout_data(
+            rollout_id,
+            self.args,
+            self.data_buffer,
+            mpu.get_data_parallel_rank(with_context_parallel=False),
+            mpu.get_data_parallel_world_size(with_context_parallel=False),
+        )
 
     def compute_log_prob(
         self,
