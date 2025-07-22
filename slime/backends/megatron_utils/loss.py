@@ -2,7 +2,6 @@ from typing import Union
 
 import torch
 from megatron.core import mpu
-import torch.distributed as dist
 
 from slime.utils.distributed_utils import distributed_masked_whiten
 from slime.utils.misc import load_function
@@ -205,14 +204,19 @@ def compute_advantages_and_returns(args, rollout_data):
                     local_mask_parts.append(full_mask[res_s1:res_e1])
 
                 # Concatenate the parts to form the final mask chunk for this rank and this sequence
-                local_mask_chunk = torch.cat(local_mask_parts) if local_mask_parts else torch.tensor([], device=all_advs.device, dtype=full_mask.dtype)
+                local_mask_chunk = (
+                    torch.cat(local_mask_parts)
+                    if local_mask_parts
+                    else torch.tensor([], device=all_advs.device, dtype=full_mask.dtype)
+                )
                 mask_chunks.append(local_mask_chunk)
 
             all_masks = torch.cat(mask_chunks)
 
         if all_masks.numel() > 0:
-            assert all_advs.size() == all_masks.size(), \
-                f"Shape mismatch before whitening: advantages {all_advs.size()}, masks {all_masks.size()}"
+            assert (
+                all_advs.size() == all_masks.size()
+            ), f"Shape mismatch before whitening: advantages {all_advs.size()}, masks {all_masks.size()}"
 
             whitened_advs_flat = distributed_masked_whiten(all_advs, all_masks, shift_mean=True)
             chunk_lengths = [chunk.size(0) for chunk in advantages]
