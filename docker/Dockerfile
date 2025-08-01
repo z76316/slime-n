@@ -1,4 +1,9 @@
-FROM lmsysorg/sglang:latest AS base
+ARG SGLANG_VERSION=latest
+FROM lmsysorg/sglang:${SGLANG_VERSION} AS sglang
+
+# we need to write this again after from
+ARG SGLANG_VERSION
+ARG MEGATRON_COMMIT=main
 
 # TODO: change to pip install sglang-router after it has a new release
 RUN pip install sglang-router --force-reinstall
@@ -27,17 +32,18 @@ RUN git clone https://github.com/NVIDIA/Megatron-LM.git --recursive && \
     pip install -e .
 
 # sandwitch norm for GLM models
-COPY patch/megatron-sandwich_norm.patch /root/Megatron-LM/
+COPY patch/${SGLANG_VERSION}/megatron.patch /root/Megatron-LM/
 RUN cd Megatron-LM && \
-    git apply megatron-sandwich_norm.patch --3way && \
+    git checkout ${MEGATRON_COMMIT} && \
+    git apply megatron.patch --3way && \
     if grep -R -n '^<<<<<<< ' .; then \
       echo "Patch failed to apply cleanly. Please resolve conflicts." && \
       exit 1; \
     fi && \
-    rm megatron-sandwich_norm.patch
+    rm megatron.patch
 
 # sglang patch
-COPY patch/sglang.patch /sgl-workspace/sglang/
+COPY patch/${SGLANG_VERSION}/sglang.patch /sgl-workspace/sglang/
 RUN cd /sgl-workspace/sglang && \
   git apply sglang.patch && \
   if grep -R -n '^<<<<<<< ' .; then \
@@ -45,3 +51,5 @@ RUN cd /sgl-workspace/sglang && \
     exit 1; \
   fi && \
   rm sglang.patch
+
+RUN rm /root/.tmux.conf
