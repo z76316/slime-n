@@ -1,6 +1,7 @@
 from sglang.srt.server_args import ServerArgs
 
 
+# TODO: use all sglang router arguments with `--sglang-router` prefix
 def add_sglang_router_arguments(parser):
     """
     Add arguments to the parser for the SGLang router.
@@ -16,6 +17,12 @@ def add_sglang_router_arguments(parser):
         type=int,
         default=None,
         help="Port of the SGLang router",
+    )
+    parser.add_argument(
+        "--sglang-router-request-timeout-secs",
+        type=int,
+        default=3600,
+        help="Timeout for requests to the SGLang router in seconds",
     )
     return parser
 

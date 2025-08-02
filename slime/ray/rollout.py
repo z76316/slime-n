@@ -170,6 +170,9 @@ def _start_router(args):
     if hasattr(router_args, "log_level"):
         router_args.log_level = "warn"
 
+    if hasattr(router_args, "request_timeout_secs"):
+        router_args.request_timeout_secs = args.sglang_router_request_timeout_secs
+
     process = multiprocessing.Process(
         target=run_router,
         args=(router_args,),
