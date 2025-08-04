@@ -1,4 +1,6 @@
+from packaging.version import parse
 from sglang.srt.server_args import ServerArgs
+import sglang
 
 
 # TODO: use all sglang router arguments with `--sglang-router` prefix
@@ -111,7 +113,7 @@ def add_sglang_arguments(parser):
 
 
 def validate_args(args):
-    if getattr(args, "sglang_enable_ep_moe", False):
+    if parse(sglang.__version__) == parse("0.4.10") and getattr(args, "sglang_enable_ep_moe", False):
         args.sglang_expert_parallel_size = args.rollout_num_gpus_per_engine
 
     args.sglang_tp_size = args.rollout_num_gpus_per_engine
