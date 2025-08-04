@@ -1,5 +1,5 @@
 """
-python convert_fp8_fast.py [-h] [--model-dir MODEL_DIR] [--save-dir SAVE_DIR] [--strategy {block,channel,tensor}] [--block-size [BLOCK_SIZE ...]]
+python tools/convert_hf_to_fp8.py [-h] [--model-dir MODEL_DIR] [--save-dir SAVE_DIR] [--strategy {block,channel,tensor}] [--block-size [BLOCK_SIZE ...]]
                            [--max-workers MAX_WORKERS]
 
 options:
@@ -18,6 +18,7 @@ import gc
 import os
 import json
 import torch
+import torch.nn.functional as F
 import safetensors
 import safetensors.torch
 import argparse
@@ -30,22 +31,40 @@ FP8_INFO = torch.finfo(torch.float8_e4m3fn)
 FP8_MAX, FP8_MIN = FP8_INFO.max, FP8_INFO.min
 
 
+def ceildiv(a, b):
+    return -(-a // b)
+
+
 def block_fp8(weight, block_size):
     dtype = weight.dtype
+
+    # per block quant
     block_n, block_k = block_size[0], block_size[1]
-    if weight.shape[0] % block_n != 0 or weight.shape[1] % block_k != 0:
-        raise ValueError(f"Block size {block_size} not compatible with weight shape {weight.shape}")
 
-    n_tiles = (weight.shape[0] + block_n - 1) // block_n
-    k_tiles = (weight.shape[1] + block_k - 1) // block_k
+    shape_0, shape_1 = weight.shape
 
-    weight_reshaped = weight.reshape(n_tiles, block_n, k_tiles, block_k)
-    block_max = torch.max(torch.abs(weight_reshaped), dim=1, keepdim=True)[0]
+    n_tiles = ceildiv(shape_0, block_n)
+    k_tiles = ceildiv(shape_1, block_k)
+
+    q_weight = F.pad(
+        weight,
+        (0, k_tiles * block_k - shape_1, 0, n_tiles * block_n - shape_0),
+        mode="constant",
+        value=0.0,
+    )
+
+    qweight = q_weight.reshape(n_tiles, block_n, k_tiles, block_k)
+    block_max = torch.max(torch.abs(qweight), dim=1, keepdim=True)[0]
     block_max = torch.max(block_max, dim=3, keepdim=True)[0]
 
     scale = block_max.to(torch.float32) / FP8_MAX
-    qweight = (weight_reshaped / scale).clamp(min=FP8_MIN, max=FP8_MAX)
-    qweight = qweight.reshape(weight.shape).to(torch.float8_e4m3fn)
+    qweight = (
+        (qweight / scale)
+        .clamp(min=FP8_MIN, max=FP8_MAX)
+        .reshape((n_tiles * block_n, k_tiles * block_k))
+        .to(torch.float8_e4m3fn)
+    )
+    qweight = qweight[:shape_0, :shape_1].clone().detach()
     scale = scale.squeeze()
 
     return qweight, scale
@@ -101,45 +120,36 @@ def process_file(input_path, output_path, filename, strategy, block_size, result
     weights = {}
     q_weights = {}
 
-    try:
-        with safetensors.safe_open(os.path.join(input_path, filename), framework="pt", device="cuda") as f:
-            for k in f.keys():
-                weights[k] = f.get_tensor(k)
+    with safetensors.safe_open(os.path.join(input_path, filename), framework="pt", device="cuda") as f:
+        for k in f.keys():
+            weights[k] = f.get_tensor(k)
 
-        modules_to_not_convert = []
-        for key in weights.keys():
-            if (
-                "weight" in key
-                and "layernorm" not in key
-                and "embed" not in key
-                and "router" not in key
-                and "mlp.gate." not in key
-                and "norm" not in key
-                and "lm_head" not in key
-                and "eh_proj" not in key
-            ):
-                qw, s = quant_fp8(weights[key], strategy, block_size)
-                q_weights[key] = qw
-                if block_size:
-                    scale_name = key.replace(".weight", ".weight_scale_inv")
-                else:
-                    scale_name = key.replace(".weight", ".weight_scale")
-                q_weights[scale_name] = s
+    modules_to_not_convert = []
+    for key in weights.keys():
+        if (
+            "weight" in key
+            and "layernorm" not in key
+            and "embed" not in key
+            and "router" not in key
+            and "mlp.gate." not in key
+            and "norm" not in key
+            and "lm_head" not in key
+            and "eh_proj" not in key
+        ):
+            qw, s = quant_fp8(weights[key], strategy, block_size)
+            q_weights[key] = qw
+            if block_size:
+                scale_name = key.replace(".weight", ".weight_scale_inv")
             else:
-                modules_to_not_convert.append(key.replace(".weight", ""))
-                q_weights[key] = weights[key]
+                scale_name = key.replace(".weight", ".weight_scale")
+            q_weights[scale_name] = s
+        else:
+            modules_to_not_convert.append(key.replace(".weight", ""))
+            q_weights[key] = weights[key]
 
-        safetensors.torch.save_file(q_weights, os.path.join(output_path, filename), metadata={"format": "pt"})
+    safetensors.torch.save_file(q_weights, os.path.join(output_path, filename), metadata={"format": "pt"})
 
-        result_collector.add_result(filename, q_weights, modules_to_not_convert)
-
-    except Exception as e:
-        print(f"Error processing file {filename}: {str(e)}")
-    finally:
-        del weights
-        del q_weights
-        gc.collect()
-        torch.cuda.empty_cache()
+    result_collector.add_result(filename, q_weights, modules_to_not_convert)
 
 
 def convert_fp8(input_path, output_path, strategy, block_size=None, max_workers=4):
@@ -147,7 +157,7 @@ def convert_fp8(input_path, output_path, strategy, block_size=None, max_workers=
     os.makedirs(output_path, exist_ok=True)
 
     for filename in os.listdir(input_path):
-        if not filename.endswith(".safetensors"):
+        if not filename.endswith(".safetensors") and not os.path.isdir(os.path.join(input_path, filename)):
             shutil.copyfile(os.path.join(input_path, filename), os.path.join(output_path, filename))
 
     safetensors_files = [f for f in os.listdir(input_path) if f.endswith(".safetensors")]
