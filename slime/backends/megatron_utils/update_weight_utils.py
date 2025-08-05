@@ -3,6 +3,7 @@ import socket
 import time
 from tqdm import tqdm
 from sglang.srt.utils import MultiprocessingSerializer
+import inspect
 
 import ray
 import torch
@@ -126,8 +127,14 @@ def named_parameters(args, model):
     if args.num_experts:
         expert_offset = ep_rank * args.num_experts // ep_size
 
-    for model_module in model:
-        layer_offset = get_transformer_layer_offset(model_module.config)
+    sig = inspect.signature(get_transformer_layer_offset)
+    need_vp_stage = "vp_stage" in sig.parameters
+
+    for vp_stage, model_module in enumerate(model):
+        if need_vp_stage:
+            layer_offset = get_transformer_layer_offset(model_module.config, vp_stage)
+        else:
+            layer_offset = get_transformer_layer_offset(model_module.config)
         for name, param in model_module.named_parameters():
             # for model without ddp wrap
             if not name.startswith("module.module."):
