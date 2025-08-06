@@ -123,28 +123,27 @@ def all_gather_with_cp(tensor: torch.Tensor, total_length: int, response_length:
     def zero(len):
         return torch.zeros([len] + list(tensor.shape[1:]), dtype=tensor.dtype, device=tensor.device)
 
-    if chunk_0.shape[0] == 0 or chunk_1.shape[0] == 0:
+    # logprob should be within the range of [prompt_length - 1, total_length - 1]
+    if chunk_0.shape[0] == 0 and chunk_1.shape[0] == 0:
         # all empty
         full_tensor = zero(response_length)
-    elif chunk_0.shape[0] != 0 or chunk_1.shape[0] == 0:
+    elif chunk_0.shape[0] != 0 and chunk_1.shape[0] == 0:
         # only first chunk
-        left = zero(logits_offset[0][0] - prompt_length)
-        right = zero(total_length - logits_offset[0][1])
+        left = zero(logits_offset[0][0] - (prompt_length - 1))
+        right = zero(total_length - 1 - logits_offset[0][1])
         full_tensor = torch.cat([left, chunk_0, right], dim=0)
-    elif chunk_0.shape[0] == 0 or chunk_1.shape[0] != 0:
+    elif chunk_0.shape[0] == 0 and chunk_1.shape[0] != 0:
         # only second chunk
-        left = zero(logits_offset[1][0] - prompt_length)
-        right = zero(total_length - logits_offset[1][1])
+        left = zero(logits_offset[1][0] - (prompt_length - 1))
+        right = zero(total_length - 1 - logits_offset[1][1])
         full_tensor = torch.cat([left, chunk_1, right], dim=0)
     else:
-        left = zero(logits_offset[0][0] - prompt_length)
+        left = zero(logits_offset[0][0] - (prompt_length - 1))
         mid = zero(logits_offset[1][0] - logits_offset[0][1])
-        right = zero(total_length - logits_offset[1][1])
-        full_tensor = torch.cat([left, chunk_0, mid, right], dim=0)
+        right = zero(total_length - 1 - logits_offset[1][1])
+        full_tensor = torch.cat([left, chunk_0, mid, chunk_1, right], dim=0)
 
     assert full_tensor.shape[0] == response_length, f"Expected {response_length}, got {full_tensor.shape}"
-
-    full_tensor = torch.cat([zero(left), chunk_0, zero(mid), chunk_1, zero(right)], dim=0)
     full_tensor = dist.nn.all_reduce(full_tensor, group=cp_group)
     return full_tensor
 
