@@ -429,7 +429,7 @@ class UpdateWeightFromDistributed:
             world_size = self.args.rollout_num_gpus + 1
 
             refs = [
-                engine.init_process_group.remote(
+                engine.init_weights_update_group.remote(
                     master_address,
                     master_port,
                     i * self.args.rollout_num_gpus_per_engine + 1,
