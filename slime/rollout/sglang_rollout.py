@@ -94,7 +94,12 @@ async def generate(args, sample: Sample, sampling_params) -> Sample:
         if len(sample.response) > 0:
             input_token_ids = sample.tokens
         else:
-            input_token_ids = state.tokenizer(sample.prompt, add_special_tokens=False)["input_ids"]
+            # First turn: initialize with prompt tokens
+            prompt_token_ids = state.tokenizer(sample.prompt, add_special_tokens=False)["input_ids"]
+            input_token_ids = prompt_token_ids
+            # Initialize sample.tokens with prompt for subsequent turns
+            if not sample.tokens:  # Only set if empty
+                sample.tokens = prompt_token_ids
         payload["input_ids"] = input_token_ids
     else:
         # String-based mode: original implementation
@@ -110,7 +115,7 @@ async def generate(args, sample: Sample, sampling_params) -> Sample:
         ), "output_token_logprobs is not in the output"
         new_response_tokens = [item[1] for item in output["meta_info"]["output_token_logprobs"]]
 
-        # Update sample with tokens directly
+        # Update sample with tokens directly - avoiding re-tokenization
         sample.tokens = sample.tokens + new_response_tokens
         sample.response_length += len(new_response_tokens)
         sample.response += state.tokenizer.decode(new_response_tokens, skip_special_tokens=False)
