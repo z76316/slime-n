@@ -20,11 +20,12 @@ RUN NVCC_APPEND_FLAGS="--threads 4" \
   pip -v install --disable-pip-version-check --no-cache-dir \
   --no-build-isolation \
   --config-settings "--build-option=--cpp_ext --cuda_ext --parallel 8" git+https://github.com/NVIDIA/apex.git
-# transformer engine
-RUN pip -v install transformer_engine[pytorch] --no-build-isolation
+# transformer engine, we install with --no-deps to avoid installing torch and torch-extensions
+RUN pip install pybind11
+RUN pip -v install --no-build-isolation git+https://github.com/NVIDIA/TransformerEngine.git@stable
 # flash attn
 # the newest version megatron supports is v2.7.4.post1
-RUN pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiTRUE-cp310-cp310-linux_x86_64.whl
+RUN MAX_JOBS=64 pip -v install flash-attn==2.7.4.post1
 
 WORKDIR /root/
 RUN git clone https://github.com/NVIDIA/Megatron-LM.git --recursive && \
