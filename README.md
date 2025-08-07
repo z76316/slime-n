@@ -134,6 +134,8 @@ PYTHONPATH=/root/Megatron-LM python tools/convert_torch_dist_to_hf.py \
   --origin-hf-dir /root/GLM-Z1-9B-0414
 ```
 
+There are times when Megatron padded embedding, you can pass `--vocab-size` to make sure the embedding size of the converted HF ckpt is correct.
+
 ⚠️ Since the `torch_dist` checkpoint converted by mbridge does not currently save args, you cannot convert the checkpoint from the previous step back to HF format.
 
 #### Any Megatron ckpt → HF
