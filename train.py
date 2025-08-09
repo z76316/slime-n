@@ -3,6 +3,7 @@ import ray
 from slime.ray.placement_group import create_actor_group, create_placement_groups, create_rollout_manager
 from slime.utils.arguments import parse_args
 from slime.utils.wandb_utils import init_wandb_primary
+from sglang.srt.constants import GPU_MEMORY_TYPE_KV_CACHE, GPU_MEMORY_TYPE_WEIGHTS
 
 
 def train(args):
@@ -37,10 +38,13 @@ def train(args):
     ray.get(actor_model.async_init_weight_update_connections(rollout_manager))
 
     if args.offload:
-        ray.get(rollout_manager.async_onload())
+        ray.get(rollout_manager.async_onload(tags=[GPU_MEMORY_TYPE_WEIGHTS]))
 
     # always update weight first so that sglang has the loaded weights from training.
     ray.get(actor_model.async_update_weights())
+
+    if args.offload:
+        ray.get(rollout_manager.async_onload(tags=[GPU_MEMORY_TYPE_KV_CACHE]))
 
     # train loop.
     # note that for async training, one can change the position of the sync operation(ray.get).
@@ -67,9 +71,12 @@ def train(args):
 
         if args.offload:
             ray.get(actor_model.async_offload())
-            ray.get(rollout_manager.async_onload())
+            ray.get(rollout_manager.async_onload(tags=[GPU_MEMORY_TYPE_WEIGHTS]))
 
         ray.get(actor_model.async_update_weights())
+
+        if args.offload:
+            ray.get(rollout_manager.async_onload(tags=[GPU_MEMORY_TYPE_KV_CACHE]))
 
         if args.eval_interval is not None and (
             (rollout_id + 1) % args.eval_interval == 0
