@@ -9,6 +9,7 @@ from slime.backends.sglang_utils.sglang_engine import SGLangEngine
 from slime.ray.buffer import Buffer
 from slime.utils.http_utils import find_available_port, get_host_info, run_router
 from .utils import Lock
+from typing import List
 
 
 def create_rollout_engines(args, pg):
@@ -164,5 +165,5 @@ class RolloutManager:
     def async_offload(self):
         return [engine.release_memory_occupation.remote() for engine in self.rollout_engines]
 
-    def async_onload(self):
-        return [engine.resume_memory_occupation.remote() for engine in self.rollout_engines]
+    def async_onload(self, tags: List[str] = None):
+        return [engine.resume_memory_occupation.remote(tags=tags) for engine in self.rollout_engines]
