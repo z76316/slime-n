@@ -14,7 +14,7 @@
 huggingface-cli download zai-org/GLM-4.5 --local-dir $BASE_DIR/GLM-4.5-355B-A32B
 ```
 
-通过如下方式通过 2 机 16 卡讲 huggingface checkpoint 转换为 torch dist 格式：
+通过如下方式通过 2 机 16 卡将 huggingface checkpoint 转换为 torch dist 格式：
 
 ```bash
 cd slime/
