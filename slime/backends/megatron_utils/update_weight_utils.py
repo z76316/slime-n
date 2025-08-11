@@ -15,6 +15,7 @@ from slime.utils.types import ParamInfo
 from .initialize import get_gloo_group
 from .megatron_to_hf import convert_to_hf  # noqa: F401
 from slime.utils.distributed_utils import init_process_group
+from sglang.srt.model_executor.model_runner import FlattenedTensorBucket
 from sglang.srt.patch_torch import monkey_patch_torch_reductions
 
 
@@ -399,12 +400,19 @@ class UpdateWeightFromTensor:
         self._update_converted_params_from_tensor(converted_named_tensors)
 
     def _update_converted_params_from_tensor(self, converted_named_tensors):
-        ipc_handle = MultiprocessingSerializer.serialize(converted_named_tensors, output_str=True)
+        flattened_tensor_bucket = FlattenedTensorBucket(named_tensors=converted_named_tensors)
+        metadata = flattened_tensor_bucket.get_metadata()
+
+        flattened_tensor_data = {
+            "flattened_tensor": flattened_tensor_bucket.get_flattened_tensor(),
+            "metadata": metadata,
+        }
+        serialized_flattened = MultiprocessingSerializer.serialize(flattened_tensor_data, output_str=True)
         serialized_named_tensors = (
             [None] * dist.get_world_size(self._ipc_gather_group) if self._ipc_gather_src == dist.get_rank() else None
         )
         dist.gather_object(
-            ipc_handle,
+            serialized_flattened,
             object_gather_list=serialized_named_tensors,
             dst=self._ipc_gather_src,
             group=self._ipc_gather_group,
@@ -412,7 +420,7 @@ class UpdateWeightFromTensor:
 
         if dist.get_rank() == self._ipc_gather_src:
             ref = self._ipc_engine.update_weights_from_tensor.remote(
-                serialized_named_tensors=serialized_named_tensors,
+                serialized_named_tensors=serialized_named_tensors, load_format="flattened_bucket"
             )
             ray.get(ref)
 
