@@ -1,8 +1,8 @@
 diff --git a/python/sglang/srt/configs/model_config.py b/python/sglang/srt/configs/model_config.py
-index f3643d154..34e7b5104 100644
+index 3091ed4..ec55bbc 100644
 --- a/python/sglang/srt/configs/model_config.py
 +++ b/python/sglang/srt/configs/model_config.py
-@@ -438,14 +438,14 @@ class ModelConfig:
+@@ -440,14 +440,14 @@ class ModelConfig:
              ).lower()
  
              # Detect which checkpoint is it
@@ -14,7 +14,7 @@ index f3643d154..34e7b5104 100644
 -                    quant_method = quantization_override
 -                    self.quantization = quantization_override
 -                    break
-+            #for _, method in QUANTIZATION_METHODS.items():
++            # for _, method in QUANTIZATION_METHODS.items():
 +            #    quantization_override = method.override_quantization_method(
 +            #        quant_cfg, self.quantization
 +            #    )
@@ -26,10 +26,10 @@ index f3643d154..34e7b5104 100644
              # Verify quantization configurations.
              if self.quantization is None:
 diff --git a/python/sglang/srt/entrypoints/http_server.py b/python/sglang/srt/entrypoints/http_server.py
-index 180d33820..a6e87b83c 100644
+index c4d3608..88c8ab0 100644
 --- a/python/sglang/srt/entrypoints/http_server.py
 +++ b/python/sglang/srt/entrypoints/http_server.py
-@@ -231,6 +231,18 @@ async def validate_json_request(raw_request: Request):
+@@ -264,6 +264,18 @@ async def validate_json_request(raw_request: Request):
  
  
  @app.get("/health")
@@ -48,7 +48,7 @@ index 180d33820..a6e87b83c 100644
  @app.get("/health_generate")
  async def health_generate(request: Request) -> Response:
      """
-@@ -1103,6 +1115,8 @@ def _wait_and_warmup(
+@@ -1172,6 +1184,8 @@ def _wait_and_warmup(
              pipe_finish_writer,
          ):
              return
@@ -58,7 +58,7 @@ index 180d33820..a6e87b83c 100644
      logger.info("The server is fired up and ready to roll!")
  
 diff --git a/python/sglang/srt/layers/moe/token_dispatcher/deepep.py b/python/sglang/srt/layers/moe/token_dispatcher/deepep.py
-index c711d4427..8a454a438 100644
+index c711d44..8a454a4 100644
 --- a/python/sglang/srt/layers/moe/token_dispatcher/deepep.py
 +++ b/python/sglang/srt/layers/moe/token_dispatcher/deepep.py
 @@ -164,6 +164,7 @@ class DeepEPBuffer:
@@ -70,7 +70,7 @@ index c711d4427..8a454a438 100644
              group,
              num_nvl_bytes,
 diff --git a/python/sglang/srt/layers/quantization/fp8.py b/python/sglang/srt/layers/quantization/fp8.py
-index 1b0824051..c2a053845 100644
+index 17e1b78..38d76ce 100644
 --- a/python/sglang/srt/layers/quantization/fp8.py
 +++ b/python/sglang/srt/layers/quantization/fp8.py
 @@ -354,10 +354,10 @@ class Fp8LinearMethod(LinearMethodBase):
@@ -81,15 +81,15 @@ index 1b0824051..c2a053845 100644
 -            layer.weight_scale_inv = torch.nn.Parameter(
 -                weight_scale, requires_grad=False
 -            )
-+            #layer.weight = torch.nn.Parameter(weight, requires_grad=False)
-+            #layer.weight_scale_inv = torch.nn.Parameter(
++            # layer.weight = torch.nn.Parameter(weight, requires_grad=False)
++            # layer.weight_scale_inv = torch.nn.Parameter(
 +            #    weight_scale, requires_grad=False
-+            #)
++            # )
              return
  
          layer.weight = torch.nn.Parameter(layer.weight.data, requires_grad=False)
 diff --git a/python/sglang/srt/managers/scheduler.py b/python/sglang/srt/managers/scheduler.py
-index 5f9b7f20f..3800f26de 100644
+index 6f6dee0..121d572 100644
 --- a/python/sglang/srt/managers/scheduler.py
 +++ b/python/sglang/srt/managers/scheduler.py
 @@ -1337,7 +1337,7 @@ class Scheduler(
@@ -97,7 +97,7 @@ index 5f9b7f20f..3800f26de 100644
          if memory_leak:
              msg = "token_to_kv_pool_allocator memory leak detected! " f"{token_msg}"
 -            raise ValueError(msg)
-+            #raise ValueError(msg)
++            # raise ValueError(msg)
  
          if self.disaggregation_mode == DisaggregationMode.DECODE:
              req_total_size = (
@@ -106,15 +106,15 @@ index 5f9b7f20f..3800f26de 100644
                  f"total_size={self.req_to_token_pool.size}\n"
              )
 -            raise ValueError(msg)
-+            #raise ValueError(msg)
++            # raise ValueError(msg)
  
          if (
              self.enable_metrics
 diff --git a/python/sglang/srt/managers/tokenizer_manager.py b/python/sglang/srt/managers/tokenizer_manager.py
-index cbd1c7332..1759f0721 100644
+index 498f0da..9cc9cc9 100644
 --- a/python/sglang/srt/managers/tokenizer_manager.py
 +++ b/python/sglang/srt/managers/tokenizer_manager.py
-@@ -1037,10 +1037,15 @@ class TokenizerManager:
+@@ -1045,10 +1045,15 @@ class TokenizerManager:
          request: Optional[fastapi.Request] = None,
      ) -> Tuple[bool, str]:
          self.auto_create_handle_loop()
@@ -134,7 +134,7 @@ index cbd1c7332..1759f0721 100644
          return result.success, result.message
  
      async def update_weights_from_distributed(
-@@ -1049,9 +1054,6 @@ class TokenizerManager:
+@@ -1057,9 +1062,6 @@ class TokenizerManager:
          request: Optional[fastapi.Request] = None,
      ) -> Tuple[bool, str]:
          self.auto_create_handle_loop()
@@ -144,7 +144,7 @@ index cbd1c7332..1759f0721 100644
  
          if obj.abort_all_requests:
              self.abort_request(abort_all=True)
-@@ -1059,8 +1061,15 @@ class TokenizerManager:
+@@ -1067,8 +1069,15 @@ class TokenizerManager:
          # This means that weight sync
          # cannot run while requests are in progress.
          async with self.model_update_lock.writer_lock:
@@ -162,3 +162,204 @@ index cbd1c7332..1759f0721 100644
  
      async def update_weights_from_tensor(
          self,
+diff --git a/python/sglang/srt/model_executor/model_runner.py b/python/sglang/srt/model_executor/model_runner.py
+index 53c3d51..6f655d1 100644
+--- a/python/sglang/srt/model_executor/model_runner.py
++++ b/python/sglang/srt/model_executor/model_runner.py
+@@ -121,6 +121,10 @@ from sglang.srt.utils import (
+     set_cpu_offload_max_bytes,
+     set_cuda_arch,
+ )
++from sglang.srt.weight_sync.tensor_bucket import (
++    FlattenedTensorBucket,
++    FlattenedTensorMetadata,
++)
+ 
+ _is_hip = is_hip()
+ _is_npu = is_npu()
+@@ -871,8 +875,18 @@ class ModelRunner:
+         named_tensors: List[Tuple[str, Union[torch.Tensor, "LocalSerializedTensor"]]],
+         load_format: Optional[str] = None,
+     ):
++        monkey_patch_torch_reductions()
++        if load_format == "flattened_bucket":
++            # Handle flattened bucket format
++            return self._update_weights_from_flattened_bucket(
++                flattened_tensor_bucket_dict=named_tensors
++            )
++
++        # We need to get device after patch otherwise the device would be wrong
++        infered_device = torch.cuda.current_device()
++
+         named_tensors = [
+-            (name, _unwrap_tensor(tensor, tp_rank=self.tp_rank))
++            (name, _unwrap_tensor(tensor, tp_rank=self.tp_rank, device=infered_device))
+             for name, tensor in named_tensors
+         ]
+         if load_format == "direct":
+@@ -886,6 +900,38 @@ class ModelRunner:
+             raise NotImplementedError(f"Unknown load_format={load_format}")
+         return True, "Success"
+ 
++    def _update_weights_from_flattened_bucket(
++        self,
++        flattened_tensor_bucket_dict,
++    ):
++        """Handle flattened bucket format for weight updates"""
++        flattened_tensor = flattened_tensor_bucket_dict["flattened_tensor"]
++        metadata = flattened_tensor_bucket_dict["metadata"]
++
++        # Convert metadata dict to our format
++        converted_metadata = []
++        for meta in metadata:
++            converted_meta = FlattenedTensorMetadata(
++                name=meta.name,
++                shape=meta.shape,
++                dtype=meta.dtype,
++                start_idx=meta.start_idx,
++                end_idx=meta.end_idx,
++                numel=meta.numel,
++            )
++            converted_metadata.append(converted_meta)
++
++        # Create bucket and reconstruct tensors
++        bucket = FlattenedTensorBucket(
++            flattened_tensor=flattened_tensor, metadata=converted_metadata
++        )
++        reconstructed_tensors = bucket.reconstruct_tensors()
++
++        # Load the reconstructed tensors using the standard method
++        self.model.load_weights(reconstructed_tensors)
++
++        return True, "Success"
++
+     def get_weights_by_name(
+         self, name: str, truncate_size: int = 100
+     ) -> Optional[torch.Tensor]:
+@@ -1779,11 +1825,10 @@ def _model_load_weights_direct(model, named_tensors: List[Tuple[str, torch.Tenso
+         default_weight_loader(params_dict[name], tensor)
+ 
+ 
+-def _unwrap_tensor(tensor, tp_rank):
++def _unwrap_tensor(tensor, tp_rank, device):
+     if isinstance(tensor, LocalSerializedTensor):
+-        monkey_patch_torch_reductions()
+         tensor = tensor.get(tp_rank)
+-    return tensor.to(torch.cuda.current_device())
++    return tensor.to(device)
+ 
+ 
+ @dataclass
+diff --git a/python/sglang/srt/weight_sync/tensor_bucket.py b/python/sglang/srt/weight_sync/tensor_bucket.py
+new file mode 100644
+index 0000000..eb9671e
+--- /dev/null
++++ b/python/sglang/srt/weight_sync/tensor_bucket.py
+@@ -0,0 +1,106 @@
++from dataclasses import dataclass
++from typing import List, Tuple
++
++import torch
++
++
++@dataclass
++class FlattenedTensorMetadata:
++    """Metadata for a tensor in a flattened bucket"""
++
++    name: str
++    shape: torch.Size
++    dtype: torch.dtype
++    start_idx: int
++    end_idx: int
++    numel: int
++
++
++class FlattenedTensorBucket:
++    """
++    A bucket that flattens multiple tensors into a single tensor for efficient processing
++    while preserving all metadata needed for reconstruction.
++    """
++
++    def __init__(
++        self,
++        named_tensors: List[Tuple[str, torch.Tensor]] = None,
++        flattened_tensor: torch.Tensor = None,
++        metadata: List[FlattenedTensorMetadata] = None,
++    ):
++        """
++        Initialize a tensor bucket from a list of named tensors OR from pre-flattened data.
++        Args:
++            named_tensors: List of (name, tensor) tuples (for creating new bucket)
++            flattened_tensor: Pre-flattened tensor (for reconstruction)
++            metadata: Pre-computed metadata (for reconstruction)
++        """
++        if named_tensors is not None:
++            # Create bucket from named tensors
++            self.metadata: List[FlattenedTensorMetadata] = [None] * len(named_tensors)
++            self.flattened_tensor: torch.Tensor = None
++
++            if not named_tensors:
++                raise ValueError("Cannot create empty tensor bucket")
++
++            # Collect metadata and flatten tensors
++            current_idx = 0
++            flattened_tensors: List[torch.Tensor] = [None] * len(named_tensors)
++
++            for i, (name, tensor) in enumerate(named_tensors):
++                flattened = tensor.flatten()
++                flattened_tensors[i] = flattened
++
++                # Store metadata
++
++                numel = flattened.numel()
++                metadata_obj = FlattenedTensorMetadata(
++                    name=name,
++                    shape=tensor.shape,
++                    dtype=tensor.dtype,
++                    start_idx=current_idx,
++                    end_idx=current_idx + numel,
++                    numel=numel,
++                )
++                self.metadata[i] = metadata_obj
++                current_idx += numel
++
++            # Concatenate all flattened tensors
++            self.flattened_tensor = torch.cat(flattened_tensors, dim=0)
++        else:
++            # Initialize from pre-flattened data
++            if flattened_tensor is None or metadata is None:
++                raise ValueError(
++                    "Must provide either named_tensors or both flattened_tensor and metadata"
++                )
++            self.flattened_tensor = flattened_tensor
++            self.metadata = metadata
++
++    def get_flattened_tensor(self) -> torch.Tensor:
++        """Get the flattened tensor containing all bucket tensors"""
++        return self.flattened_tensor
++
++    def get_metadata(self) -> List[FlattenedTensorMetadata]:
++        """Get metadata for all tensors in the bucket"""
++        return self.metadata
++
++    def reconstruct_tensors(self) -> List[Tuple[str, torch.Tensor]]:
++        """
++        Reconstruct original tensors from flattened tensor with optimized performance.
++        Uses memory-efficient operations to minimize allocations and copies.
++        """
++        # preallocate the result list
++        reconstructed = [None] * len(self.metadata)
++
++        for i, meta in enumerate(self.metadata):
++            tensor = self.flattened_tensor[meta.start_idx : meta.end_idx].reshape(
++                meta.shape
++            )
++
++            # batch dtype conversion (if needed)
++            if tensor.dtype != meta.dtype:
++                tensor = tensor.to(meta.dtype)
++
++            reconstructed[i] = (meta.name, tensor)
++
++        return reconstructed
+\ No newline at end of file

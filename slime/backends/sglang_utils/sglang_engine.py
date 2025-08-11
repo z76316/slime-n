@@ -1,6 +1,5 @@
 import dataclasses
 
-import os
 
 from sglang.srt.server_args import ServerArgs
 from slime.utils.http_utils import get_host_info
