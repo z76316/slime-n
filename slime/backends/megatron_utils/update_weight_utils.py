@@ -323,6 +323,7 @@ class UpdateWeightFromTensor:
                 self._ipc_gather_group = new_group
                 self._ipc_engine = engine
 
+    @torch.no_grad()
     def update_weights(self):
         rank = dist.get_rank()
         if rank == 0:
@@ -350,7 +351,8 @@ class UpdateWeightFromTensor:
             if dist.get_rank() == info.src_rank:
                 params.append(
                     torch.nn.Parameter(
-                        self.weights["actor"][info.name].to(device=torch.cuda.current_device(), non_blocking=True)
+                        self.weights["actor"][info.name].to(device=torch.cuda.current_device(), non_blocking=True),
+                        requires_grad=False,
                     )
                 )
             else:
@@ -406,7 +408,7 @@ class UpdateWeightFromTensor:
         self._update_converted_params_from_tensor(converted_named_tensors)
 
     def _update_converted_params_from_tensor(self, converted_named_tensors):
-        if use_flattened_tensor_bucket:
+        if use_flattened_tensor_bucket and self.quantization_config is None:
             flattened_tensor_bucket = FlattenedTensorBucket(named_tensors=converted_named_tensors)
             metadata = flattened_tensor_bucket.get_metadata()
 
@@ -432,7 +434,7 @@ class UpdateWeightFromTensor:
             kwargs = {
                 "serialized_named_tensors": serialized_named_tensors,
             }
-            if use_flattened_tensor_bucket:
+            if use_flattened_tensor_bucket and self.quantization_config is None:
                 kwargs["load_format"] = "flattened_bucket"
 
             ref = self._ipc_engine.update_weights_from_tensor.remote(**kwargs)
@@ -488,6 +490,7 @@ class UpdateWeightFromDistributed:
             )
             ray.get(refs)
 
+    @torch.no_grad()
     def update_weights(self):
         if dist.get_rank() == 0:
             ray.get([engine.pause_generation.remote() for engine in self.rollout_engines])
