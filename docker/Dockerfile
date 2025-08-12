@@ -29,7 +29,7 @@ RUN pip -v install --no-build-isolation git+https://github.com/NVIDIA/Transforme
 # flash attn
 # the newest version megatron supports is v2.7.4.post1
 RUN MAX_JOBS=64 pip -v install flash-attn==2.7.4.post1
-RUN pip install git+https://github.com/zhuzilin/pytorch-malloc.git
+RUN pip install git+https://github.com/fzyzcjy/torch_memory_saver.git --no-cache-dir --force-reinstall
 
 WORKDIR /root/
 RUN git clone https://github.com/NVIDIA/Megatron-LM.git --recursive && \
