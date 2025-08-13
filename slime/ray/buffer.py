@@ -1,4 +1,5 @@
 import logging
+from dataclasses import replace
 from pathlib import Path
 from typing import Union
 import wandb
@@ -6,10 +7,13 @@ import wandb
 import ray
 import torch
 
+from slime.rollout.components.base_rollout_fn import RolloutFnInitParams, RolloutFnCallParams
+from slime.rollout.components.legacy_adapter_rollout_fn import LegacyAdapterRolloutFn
 from slime.utils.misc import load_function
 from slime.utils.types import Sample
 from slime.ray.rollout_data_source import RolloutDataSource
 from slime.utils.ray_utils import Box
+from slime.utils.typing_utils import get_function_num_args
 from slime.utils.wandb_utils import init_wandb_secondary
 
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -42,6 +46,18 @@ def log_eval_data(rollout_id, args, data):
         wandb.log(log_dict)
 
 
+# TODO maybe move
+def _load_rollout_fn(path: str, params: RolloutFnInitParams):
+    obj = load_function(path)
+    num_args = get_function_num_args(obj)
+    assert num_args in {1, 4}, f"{num_args=}"
+    if num_args == 4:
+        obj = LegacyAdapterRolloutFn(params, obj)
+    else:
+        obj = obj(params)
+    return obj
+
+
 @ray.remote
 class Buffer:
     def __init__(self, args, wandb_run_id):
@@ -58,8 +74,9 @@ class Buffer:
         else:
             self.buffer_filter = load_function(self.args.buffer_filter_path)
 
-        self.generate_rollout = load_function(self.args.rollout_function_path)
-        self.eval_generate_rollout = load_function(self.args.eval_function_path)
+        params = RolloutFnInitParams(args=args, buffer=self, evaluation=False)
+        self.generate_rollout = _load_rollout_fn(self.args.rollout_function_path, params)
+        self.eval_generate_rollout = _load_rollout_fn(self.args.eval_function_path, replace(params, evaluation=True))
         print(f"import {self.args.rollout_function_path} as generate_rollout function.")
         print(f"import {self.args.eval_function_path} as eval_generate_rollout function.")
 
@@ -113,7 +130,7 @@ class Buffer:
             )["samples"]
             data = [Sample.from_dict(sample) for sample in data]
         else:
-            data = self.generate_rollout(self.args, rollout_id, self, evaluation=False)
+            data = self.generate_rollout(RolloutFnCallParams(rollout_id=rollout_id)).samples
             # flatten the data if it is a list of lists
             if isinstance(data[0], list):
                 data = sum(data, [])
@@ -139,7 +156,7 @@ class Buffer:
             # if debug train only, we don't generate evaluation data
             return
 
-        data = self.eval_generate_rollout(self.args, rollout_id, self, evaluation=True)
+        data = self.eval_generate_rollout(RolloutFnCallParams(rollout_id=rollout_id)).metrics
         log_eval_data(rollout_id, self.args, data)
 
     def _convert_samples_to_train_data(self, samples: Union[list[Sample], list[list[Sample]]]):
