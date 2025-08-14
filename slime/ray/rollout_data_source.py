@@ -148,7 +148,7 @@ class RolloutDataSourceWithBuffer(RolloutDataSource):
         if len(self.buffer) == 0 or num_samples == 0:
             return []
 
-        samples = self.buffer_filter(self.args, self.rollout_id, self.buffer, num_samples)
+        samples = self.buffer_filter(self.args, None, self.buffer, num_samples)
         return samples
 
     def add_samples(self, samples: list[list[Sample]]):
