@@ -118,7 +118,6 @@ class MegatronTrainRayActor(TrainRayActor):
 
         clear_memory()
         print_memory(f"before offload model")
-        self.update_cpu_params_dict(self.weights["actor"])
         if hasattr(mpu, "destroy_process_groups"):
             mpu.destroy_process_groups()
 
@@ -255,8 +254,9 @@ class MegatronTrainRayActor(TrainRayActor):
                 ),
                 path,
             )
-        if not self.args.colocate and not self.args.offload:
-            self.update_cpu_params_dict(self.weights["actor"])
+
+        # update the cpu actor weight to the latest model
+        self.update_cpu_params_dict(self.weights["actor"])
 
         log_perf_data(rollout_id, self.args)
         Timer().start("train_wait")
