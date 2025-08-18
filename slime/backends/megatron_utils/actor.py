@@ -255,6 +255,8 @@ class MegatronTrainRayActor(TrainRayActor):
                 ),
                 path,
             )
+        if not self.args.colocate and not self.args.offload:
+            self.update_cpu_params_dict(self.weights["actor"])
 
         log_perf_data(rollout_id, self.args)
         Timer().start("train_wait")
