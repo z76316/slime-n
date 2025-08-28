@@ -344,6 +344,11 @@ class MegatronTrainRayActor(TrainRayActor):
         self.args.no_load_optim = True
         self.args.no_load_rng = True
         self.args.finetune = True
+
+        if model_tag == "ref" and self.args.ref_ckpt_step is not None:
+            old_ckpt_step = self.args.ckpt_step
+            self.args.ckpt_step = self.args.ref_ckpt_step
+
         _, _ = load_checkpoint(
             self.model,
             None,
@@ -352,6 +357,9 @@ class MegatronTrainRayActor(TrainRayActor):
             skip_load_to_model_and_opt=False,
         )
         self.args.load, self.args.no_load_optim, self.args.no_load_rng, self.args.finetune = old_args
+
+        if model_tag == "ref" and self.args.ref_ckpt_step is not None:
+            self.args.ckpt_step = old_ckpt_step
 
         self.weights[model_tag] = {}
         self.update_cpu_params_dict(self.weights[model_tag])

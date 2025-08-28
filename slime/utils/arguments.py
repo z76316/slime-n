@@ -496,6 +496,9 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                     "When --load is not set, this will be used as the initial checkpoint for training. "
                 ),
             )
+            parser.add_argument(
+                "--ref-ckpt-step", type=int, default=None, help="The checkpoint step for reference model. "
+            )
             parser.add_argument("--eps-clip", type=float, default=0.2, help="PPO clip range")
             parser.add_argument("--eps-clip-high", type=float, default=None, help="PPO clip upper range")
             parser.add_argument(
