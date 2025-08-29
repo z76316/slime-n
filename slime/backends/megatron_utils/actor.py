@@ -36,6 +36,10 @@ class MegatronTrainRayActor(TrainRayActor):
     def init(self, args, role, wandb_run_id, with_ref=False):
         super().init(args, role, with_ref)
 
+        if self.args.debug_rollout_only:
+            Timer().start("train_wait")
+            return 0
+
         init(args)
 
         if is_megatron_main_rank():
@@ -47,10 +51,6 @@ class MegatronTrainRayActor(TrainRayActor):
                 self.hf_config = AutoConfig.from_pretrained(args.hf_checkpoint, trust_remote_code=True)
                 self.tokenizer = AutoTokenizer.from_pretrained(self.args.hf_checkpoint, trust_remote_code=True)
             dist.barrier(group=get_gloo_group())
-
-        if self.args.debug_rollout_only:
-            Timer().start("train_wait")
-            return 0
 
         (self.model, self.optimizer, self.opt_param_scheduler, loaded_rollout_id) = initialize_model_and_optimizer(
             args
