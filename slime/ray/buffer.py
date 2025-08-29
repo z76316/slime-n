@@ -190,7 +190,7 @@ def log_rollout_data(rollout_id, args, data, rollout_time):
     log_dict["perf/longest_sample_tokens_per_sec"] = max(response_lengths) / rollout_time
     print(f"perf {rollout_id}: {log_dict}")
     if args.use_wandb:
-        log_dict["perf/step"] = (
+        log_dict["rollout/step"] = (
             rollout_id
             if not args.wandb_always_use_train_step
             else rollout_id * args.rollout_batch_size * args.n_samples_per_prompt // args.global_batch_size
