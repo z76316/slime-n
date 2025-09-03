@@ -285,7 +285,7 @@ def get_param_info_buckets(args, model) -> list[list[ParamInfo]]:
             tp_size = mpu.get_tensor_model_parallel_world_size()
         param_size = info.size * tp_size
 
-        if buffer_size + param_size > args.update_weight_buffer_size:
+        if buffer_size + param_size > args.update_weight_buffer_size and len(param_info_buckets[-1]) > 0:
             param_info_buckets.append([])
             buffer_size = 0
         param_info_buckets[-1].append(info)
