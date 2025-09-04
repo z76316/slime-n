@@ -1,4 +1,4 @@
-# Qwen3-4B-Base with OpenHermes-2.5
+# SFT Qwen3-4B-Base with OpenHermes-2.5
 
 
 ## Environment Preparation

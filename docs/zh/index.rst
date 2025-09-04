@@ -23,13 +23,12 @@ Slime 是一个面向 RL 扩展的 LLM 后训练框架，提供两大核心能�
    :maxdepth: 1
    :caption: 示例
 
-   examples/qwen3-4b-base-openhermes.md
-   examples/deepseek-r1.md
-   examples/glm4.5-355B-A32B.md
-   examples/glm4-9B.md
    examples/qwen3-4B.md
+   examples/glm4-9B.md
    examples/qwen3-30B-A3B.md
-
+   examples/glm4.5-355B-A32B.md
+   examples/deepseek-r1.md
+   examples/qwen3-4b-base-openhermes.md
 
 .. toctree::
    :maxdepth: 1
