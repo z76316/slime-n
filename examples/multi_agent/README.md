@@ -1,4 +1,4 @@
-# Example: Multi-Agent RL
+# Multi-Agent RL
 
 This directory provides an example of running multi-agent reinforcement learning (RL) with Slime.
 
