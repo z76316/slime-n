@@ -1,7 +1,5 @@
 # 64xH100 训练 GLM-4.5
 
-[English](../../en/models/glm4.5-355B-A32B.md)
-
 这里是使用 64xH100 进行 GLM-4.5 355B RL 训练的示例。
 
 ## 环境准备

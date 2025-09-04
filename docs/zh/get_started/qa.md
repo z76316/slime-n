@@ -1,7 +1,5 @@
 # 常见 Q&A
 
-[English](../en/qa.md)
-
 1. **训练过程中为什么会出现乱码？**
 
    一般来说这种情况是 megatron 没有被正确加载。请检查 `--load` 或 `--ref-load` 是否有对应的 ckpt。注意 megatron 只能加载其中有 `latest_checkpointed_iteration.txt` 的目录。

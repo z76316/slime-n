@@ -1,7 +1,5 @@
 # 使用文档
 
-[English](../en/usage.md)
-
 ## slime 参数简介
 
 在使用 slime 时，传参主要是为了如下几件事：
