@@ -33,6 +33,8 @@
 
 - [快速开始指南](./docs/zh/quick_start.md)
 
+我还还额外提供了一些使用样例，请参考样例目录：[examples](examples/)。
+
 ## 参数说明
 
 参数分为三类：
