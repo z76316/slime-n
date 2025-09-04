@@ -1,4 +1,4 @@
-# Qwen3-4B
+# 8xH100 训练 Qwen3-4B
 
 [English](../../en/models/qwen3-4B.md)
 

@@ -1,4 +1,4 @@
-# GLM4-9B
+# 8xH100 训练 GLM4-9B
 
 [English](../../en/models/glm4-9B.md)
 

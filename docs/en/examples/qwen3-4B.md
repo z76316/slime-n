@@ -1,4 +1,4 @@
-# Qwen3-4B
+# Training Qwen3-4B with 8xH100
 
 ## Environment Setup
 
