@@ -1,7 +1,5 @@
 # 8xH100 训练 GLM4-9B
 
-[English](../../en/models/glm4-9B.md)
-
 ## 环境准备
 
 拉取 `zhuzilin/slime:latest` 镜像后，用如下方式初始化镜像环境：

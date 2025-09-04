@@ -1,7 +1,5 @@
 # SFT Qwen3-4B-Base
 
-[English](../en/sft.md)
-
 ## 环境准备
 
 首先需要我们仿照 [示例：Qwen3-4B 模型](./models/qwen3-4B.md) 创建镜像环境与转换 `Qwen3-4B-Base` 模型。

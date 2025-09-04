@@ -1,22 +1,52 @@
 // Inject a language toggle button into the topbar (sphinx-book-theme compatible)
 (function(){
   const STORAGE_KEY = 'slime-doc-lang';
-  const AVAILABLE = ['en','zh'];
+  // Default language EN has no URL prefix; Chinese uses '/zh/' inserted after optional repo root.
   function detectCurrent(){
-    const parts = window.location.pathname.split('/').filter(Boolean);
-    if(parts.length>0 && AVAILABLE.includes(parts[0])) return parts[0];
-    return 'en';
+    const { zhIndex } = analyzePath();
+    return zhIndex !== -1 ? 'zh' : 'en';
   }
-  function otherLang(lang){ return lang === 'en' ? 'zh' : 'en'; }
+  function otherLang(lang){ return lang === 'zh' ? 'en' : 'zh'; }
+  /**
+   * Analyze current pathname to figure out repo root + language segment pattern.
+   * Supports patterns:
+   *  /en/…                (language as first segment)
+   *  /slime/en/…          (GitHub Pages project site repo root, language second)
+   *  /slime/ (no lang yet) -> insert /slime/zh/
+   *  / (no lang) -> insert /zh/
+   */
+  function analyzePath(){
+    const rawParts = window.location.pathname.split('/').filter(Boolean);
+    const parts = rawParts.slice();
+    let repoRoot = null;
+    if(parts.length > 0 && (window.location.host.endsWith('github.io') || parts[0] === 'slime')){
+      repoRoot = parts[0];
+    }
+    let zhIndex = -1;
+    if(parts[0] === 'zh') zhIndex = 0; else if(parts[1] === 'zh') zhIndex = 1;
+    return { parts, repoRoot, zhIndex };
+  }
+
   function buildTargetUrl(target){
     const url = new URL(window.location.href);
-    const parts = url.pathname.split('/').filter(Boolean);
-    if(parts.length === 0){
-      url.pathname = `/${target}/`;
-      return url.toString();
+    const trailingSlash = url.pathname.endsWith('/') || url.pathname === '/';
+    const { parts, repoRoot, zhIndex } = analyzePath();
+    if(target === 'zh'){
+      if(zhIndex === -1){
+        if(repoRoot){
+          if(parts.length === 1) parts.push('zh'); else parts.splice(1,0,'zh');
+        } else {
+          parts.unshift('zh');
+        }
+      }
+    } else { // target en => remove zh if present
+      if(zhIndex !== -1) parts.splice(zhIndex,1);
     }
-    if(AVAILABLE.includes(parts[0])) parts[0] = target; else parts.unshift(target);
-    url.pathname = '/' + parts.join('/') + (url.pathname.endsWith('/') ? '' : '');
+    let newPath = '/' + parts.join('/');
+    if(newPath === '/') {
+      // stay root
+    } else if(trailingSlash && !/\.[a-zA-Z0-9]+$/.test(parts[parts.length-1] || '')) newPath += '/';
+    url.pathname = newPath;
     return url.toString();
   }
   function createButton(){

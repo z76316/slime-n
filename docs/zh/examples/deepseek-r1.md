@@ -1,7 +1,5 @@
 # 128xH100 训练 DeepSeek R1
 
-[English](../../en/models/deepseek-r1.md)
-
 这里是使用 128xH100 进行 DeepSeek R1 RL 训练的示例。
 
 我们会使用 bf16 进行训练，128x128 blockwise quant 的 fp8 格式进行推理，模型最大回复长度为 32k，并训练中会使用 dynamic sampling 对数据进行筛选。
