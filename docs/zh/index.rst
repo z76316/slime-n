@@ -3,7 +3,7 @@ slime文档
 
 .. raw:: html
 
-   <a href="/index.html" class="btn btn-outline-primary mb-2" target="_blank">Change to English</a>
+   <a href="/slime/index.html" class="btn btn-outline-primary mb-2" target="_blank">Change to English</a>
 
 
 Slime 是一个面向 RL 扩展的 LLM 后训练框架，提供两大核心能力：

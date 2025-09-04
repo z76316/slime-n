@@ -3,7 +3,7 @@ slime Documentation
 
 .. raw:: html
 
-   <a href="/zh/index.html" class="btn btn-outline-primary mb-2" target="_blank">切换至中文版</a>
+   <a href="/slime/zh/index.html" class="btn btn-outline-primary mb-2" target="_blank">切换至中文版</a>
 
 
 slime is an LLM post-training framework for RL scaling, providing two core capabilities:
