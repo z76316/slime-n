@@ -2,7 +2,7 @@
 
 [中文版](./README_zh.md)
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/slime/slime)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/THUDM/slime)
 
 **slime** is an LLM post-training framework for RL scaling, providing two core capabilities:
 
