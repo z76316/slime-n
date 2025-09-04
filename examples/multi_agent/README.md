@@ -1,10 +1,10 @@
 # Multi-Agent RL
 
-This directory provides an example of running multi-agent reinforcement learning (RL) with Slime.
+This directory provides an example of running multi-agent reinforcement learning (RL) with slime.
 
 ## Environment Setup
 
-The environment setup is identical to the standard RL setup used in Slime.
+The environment setup is identical to the standard RL setup used in slime.
 
 ## Running the Script
 
