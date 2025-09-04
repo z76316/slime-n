@@ -1,4 +1,4 @@
-# Training GLM-4.5 with 64xH100
+# GLM-4.5 with 64xH100
 
 
 This is an example of doing GLM-4.5 RL training using 64xH100 GPUs.

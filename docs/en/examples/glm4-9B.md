@@ -1,4 +1,4 @@
-# Training GLM4-9B with 8xH100
+# GLM4-9B with 8xH100
 
 ## Environment Setup
 
