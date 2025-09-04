@@ -1,4 +1,4 @@
-# Training Qwen3-30B-A3B with 8xH100
+# Qwen3-30B-A3B with 8xH100
 
 
 ## Environment Preparation

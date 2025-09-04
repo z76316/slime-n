@@ -21,13 +21,23 @@ slime is an LLM post-training framework for RL scaling, providing two core capab
 
 .. toctree::
    :maxdepth: 1
-   :caption: Examples
+   :caption: Dense
 
    examples/qwen3-4B.md
    examples/glm4-9B.md
+
+.. toctree::
+   :maxdepth: 1
+   :caption: MoE
+
    examples/qwen3-30B-A3B.md
    examples/glm4.5-355B-A32B.md
    examples/deepseek-r1.md
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Other Usage
+
    examples/qwen3-4b-base-openhermes.md
 
 
