@@ -38,6 +38,8 @@
 For a comprehensive quick start guide covering environment setup, data preparation, training startup, and key code analysis, please refer to:
 - [Quick Start Guide](./docs/en/quick_start.md)
 
+We also provides examples for some usecases not covered in the quick start guide, please check [examples](examples/).
+
 ## Arguments Walk Through
 
 Arguments in slime are divided into three categories:
