@@ -158,6 +158,7 @@ class FSDPTrainRayActor(TrainRayActor):
                         dtype=torch.float,
                         device=torch.cuda.current_device(),
                     ),
+                    "raw_reward": rollout_data["raw_reward"][i : i + self.args.micro_batch_size],
                 }
             )
         return padded_batches
@@ -193,12 +194,15 @@ class FSDPTrainRayActor(TrainRayActor):
 
         # TODO: finish log rollout_data
         log_dict = {}
-        for key in ["log_probs", "ref_log_probs", "advantages", "returns"]:
+        for key in ["log_probs", "ref_log_probs", "advantages", "returns", "raw_reward"]:
             if key not in padded_batches[0]:
                 continue
             val = torch.tensor([0.0], device=torch.cuda.current_device())
             for batch in padded_batches:
-                val += per_sample_mean(batch[key], batch["loss_masks"]).item()
+                if isinstance(batch[key], torch.Tensor):
+                    val += per_sample_mean(batch[key], batch["loss_masks"]).item()
+                else:
+                    val += sum(batch[key])
             dist.all_reduce(val, op=dist.ReduceOp.SUM)
             log_dict[f"rollout/{key}"] = (val / len(padded_batches) / world_size).item()
         if dist.get_rank() == 0:
