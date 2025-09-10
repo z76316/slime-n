@@ -9,18 +9,23 @@ from xtuner.v1.config import AdamWConfig, FSDPConfig
 from xtuner.v1.data_proto.sequence_context import SequenceContext
 from xtuner.v1.model import get_model_config_from_hf
 
+import wandb
 from slime.backends.utils.data import process_rollout_data
 from slime.ray.train_actor import TrainRayActor
 from slime.utils.distributed_utils import get_gloo_group
 from slime.utils.ppo_utils import compute_approx_kl
+from slime.utils.wandb_utils import init_wandb_secondary
 
-from .model import clip_grad_norm, gather_logprobs, train_step
+from .model import gather_logprobs, train_step
 from .update_weight_utils import UpdateWeightFromDistributed
 
 
 class XTunerTrainRayActor(TrainRayActor):
     def init(self, args, role, wandb_run_id, with_ref: bool = False):
         super().init(args, role, wandb_run_id, with_ref)
+
+        if dist.get_rank() == 0:
+            init_wandb_secondary(args, wandb_run_id)
 
         torch.manual_seed(args.seed)
 
@@ -95,8 +100,11 @@ class XTunerTrainRayActor(TrainRayActor):
         dp_rank = dist.get_rank() // self.args.sp_size
         dp_size = dist.get_world_size() // self.args.sp_size
         rollout_data = process_rollout_data(self.args, rollout_data_ref, dp_rank, dp_size)
+        # loss masks is for logprobs, so it should start from prompt_len - 1
         rollout_data["loss_masks"] = [
-            torch.tensor([0] * (len(t) - len(l)) + l, dtype=torch.int, device=torch.cuda.current_device()).unsqueeze(0)
+            torch.tensor(
+                [0] * (len(t) - len(l) - 1) + l + [0], dtype=torch.int, device=torch.cuda.current_device()
+            ).unsqueeze(0)
             for t, l in zip(rollout_data["tokens"], rollout_data["loss_masks"])
         ]
         rollout_data["tokens"] = [
@@ -173,25 +181,12 @@ class XTunerTrainRayActor(TrainRayActor):
         seq_ctx_list, shifted_labels_list, advantages_list = self.get_rollout_data(rollout_data_ref)
         masks = [labels != -100 for labels in shifted_labels_list]
 
-        rank_grad_tokens: torch.Tensor | None = None
-        for mask in masks:
-            grad_tokens = mask.sum()
-            rank_grad_tokens = grad_tokens if rank_grad_tokens is None else rank_grad_tokens + grad_tokens
-        rank_grad_tokens = cast(torch.Tensor, rank_grad_tokens)
-        global_grad_tokens = rank_grad_tokens
+        global_grad_tokens = sum([mask.sum() for mask in masks])
         dist.all_reduce(global_grad_tokens, op=dist.ReduceOp.SUM)
+        global_grad_tokens = global_grad_tokens.clamp_min(1)
 
         # old logprobs are inplaced updated in compute_actor_logprobs
         old_logprobs_list = self.compute_logprobs(self.model, seq_ctx_list, shifted_labels_list)
-        sum_old_logprobs: torch.Tensor | None = None
-        for old_logprobs, mask in zip(old_logprobs_list, masks):
-            old_logprobs = -(old_logprobs * mask).sum()
-            sum_old_logprobs = old_logprobs if sum_old_logprobs is None else sum_old_logprobs + old_logprobs
-        dist.all_reduce(sum_old_logprobs, op=dist.ReduceOp.SUM)
-        avg_logprobs = sum_old_logprobs / global_grad_tokens if global_grad_tokens > 0 else 0
-
-        if dist.get_rank() == 0:
-            print(f"Rollout {rollout_id}: avg generation entropy: {avg_logprobs:.4f}")
 
         if self.with_ref:
             self.ref_model.to_device(torch.cuda.current_device())
@@ -209,16 +204,46 @@ class XTunerTrainRayActor(TrainRayActor):
 
             kl_div_sum = cast(torch.Tensor, kl_div_sum)
             dist.all_reduce(kl_div_sum, op=dist.ReduceOp.SUM)
-            avg_kl_div = kl_div_sum / global_grad_tokens if global_grad_tokens > 0 else 0
+            avg_kl_div = kl_div_sum / global_grad_tokens
             if dist.get_rank() == 0:
-                print(f"Rollout {rollout_id}: avg KL divergence: {avg_kl_div:.4f}")
+                print(f"Rollout {rollout_id}: avg KL divergence: {avg_kl_div}")
 
-        iters_per_step = len(seq_ctx_list) // 1
+        # log
+        # TODO: extract this
+        log_dict = {}
+        sum_old_logprobs = sum([-(old_logprobs * mask).sum() for old_logprobs, mask in zip(old_logprobs_list, masks)])
+        dist.all_reduce(sum_old_logprobs, op=dist.ReduceOp.SUM)
+        log_dict["rollout/log_probs"] = (sum_old_logprobs / global_grad_tokens).item()
+        if self.with_ref:
+            sum_ref_logprobs = sum(
+                [-(old_logprobs * mask).sum() for old_logprobs, mask in zip(old_logprobs_list, masks)]
+            )
+            dist.all_reduce(sum_ref_logprobs, op=dist.ReduceOp.SUM)
+            log_dict["rollout/ref_log_probs"] = (sum_ref_logprobs / global_grad_tokens).item()
+
+        if dist.get_rank() == 0:
+            print(f"rollout {rollout_id}: {log_dict}")
+            if self.args.use_wandb:
+                log_dict["rollout/step"] = (
+                    rollout_id
+                    if not self.args.wandb_always_use_train_step
+                    else rollout_id
+                    * self.args.rollout_batch_size
+                    * self.args.n_samples_per_prompt
+                    // self.args.global_batch_size
+                )
+                wandb.log(log_dict)
+
+        dp_size = dist.get_world_size() // self.args.sp_size
+        iters_per_step = self.args.global_batch_size // dp_size
+        num_steps_per_rollout = len(seq_ctx_list) // iters_per_step
+
         for i in range(0, len(seq_ctx_list), iters_per_step):
-            loss_log, other_log = train_step(
+            log_dict = train_step(
                 self.args,
                 self.model,
                 self.model_cfg,
+                self.optimizer,
                 data_batches=[
                     {
                         "seq_ctx": seq_ctx_list[i + j],
@@ -230,27 +255,13 @@ class XTunerTrainRayActor(TrainRayActor):
                     }
                     for j in range(iters_per_step)
                 ],
+                global_grad_tokens=global_grad_tokens,
             )
-            grad_norm = clip_grad_norm(self.model, self.args.clip_grad)
-            if torch.isnan(grad_norm) or torch.isinf(grad_norm):
-                self.optimizer.zero_grad()
-            else:
-                self.optimizer.step()
-                self.optimizer.zero_grad()
-
-            log_info = dict()
-            log_info.update(loss_log)
-            log_info.update(other_log)
-            log_info["grad_norm"] = grad_norm.item()
-            log_str = ", ".join(
-                f"{key}={value:.4f}" if isinstance(value, float) else f"{key}={value}"
-                for key, value in log_info.items()
-            )
-            log_str = f"Rollout {rollout_id} Step {i}: " + log_str
             if dist.get_rank() == 0:
-                print(log_str)
-
-        return
+                print(f"step {rollout_id * num_steps_per_rollout + i}: {log_dict}")
+                if self.args.use_wandb:
+                    log_dict["train/step"] = rollout_id * num_steps_per_rollout + i // iters_per_step
+                    wandb.log(log_dict)
 
     def update_weights(self):  # type: ignore[override]
         if self.args.debug_train_only or self.args.debug_rollout_only:
