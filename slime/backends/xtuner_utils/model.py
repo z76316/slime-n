@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
@@ -7,24 +7,12 @@ from torch.distributed._tensor import DTensor, Replicate, Shard
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import Placement
 from torch.utils._foreach_utils import _device_has_foreach_support, _has_foreach_support
-from xtuner.v1.data_proto.utils import pad_to_multiple_of, split_for_sequence_parallel
 from xtuner.v1.module.router import NoAuxRouterConfig
 
 from slime.utils.ppo_utils import compute_approx_kl, compute_policy_loss
 
 
-def train_step(args, model, model_cfg, data_batches: list[dict]):
-    """Perform a training step with the given data batches and mesh.
-
-    Args:
-        data_batches (List[Dict]): The input data batches for the training step.
-    """
-
-    loss_log = {}
-    other_log = {}
-
-    iters_per_step = len(data_batches)
-
+def train_step(args, model, model_cfg, optimizer, data_batches: list[dict], global_grad_tokens):
     moe_need_update_bias = (
         isinstance(getattr(model_cfg, "router", None), NoAuxRouterConfig)
         and model_cfg.router.router_bias_update_speed > 0
@@ -38,10 +26,17 @@ def train_step(args, model, model_cfg, data_batches: list[dict]):
             device=torch.cuda.current_device(),
         )
 
-    step_loss = torch.tensor(0.0, device=torch.cuda.current_device())
-    step_llm_loss = torch.tensor(0.0, device=torch.cuda.current_device())
-    step_balancing_loss: torch.Tensor | None = None
-    step_z_loss: torch.Tensor | None = None
+    loss_dict = {}
+
+    def update_loss_dict(key: str, val):
+        # TODO: this is slow
+        val = val.item() if isinstance(val, torch.Tensor) else val
+        if not key.startswith("train/"):
+            key = f"train/{key}"
+        if key not in loss_dict:
+            loss_dict[key] = val
+        else:
+            loss_dict[key] += val
 
     for data_batch in data_batches:
         seq_ctx = data_batch["seq_ctx"]
@@ -59,7 +54,8 @@ def train_step(args, model, model_cfg, data_batches: list[dict]):
         ppo_kl = logprobs - old_logprobs
 
         pg_loss, pg_clipfrac = compute_policy_loss(ppo_kl, advantages, args.eps_clip, args.eps_clip_high)
-        pg_loss = (pg_loss * mask).sum() / mask.sum().clamp_min(1)
+        pg_clipfrac = (pg_clipfrac * mask).sum() / global_grad_tokens
+        pg_loss = (pg_loss * mask).sum() / global_grad_tokens
         loss = pg_loss
 
         if args.use_kl_loss:
@@ -69,29 +65,37 @@ def train_step(args, model, model_cfg, data_batches: list[dict]):
                 ref_log_probs,
                 kl_loss_type=args.kl_loss_type,
             )
-            kl_loss = (kl * mask).sum() / mask.sum().clamp_min(1)
+            kl_loss = (kl * mask).sum() / global_grad_tokens
             loss = loss + args.kl_loss_coef * kl_loss
 
-        loss = loss / iters_per_step
-
+        # TODO: find out how to to per token loss and per sample loss for balancing loss and z_loss
         if "balancing_loss" in output:
-            loss = loss + output["balancing_loss"] / iters_per_step
-            step_balancing_loss = (
-                output["balancing_loss"]
-                if step_balancing_loss is None
-                else step_balancing_loss + output["balancing_loss"]
-            )
+            balancing_loss = output["balancing_loss"] / len(data_batches)
+            loss = loss + balancing_loss
         if "z_loss" in output:
-            loss = loss + output["z_loss"] / iters_per_step
-            step_z_loss = output["z_loss"] if step_z_loss is None else step_z_loss + output["z_loss"]
+            z_loss = output["z_loss"] / len(data_batches)
+            loss = loss + z_loss
 
         if moe_need_update_bias:
             assert "tokens_per_expert_global" in output, "tokens_per_expert_global is required for bias update."
             tokens_per_expert_global_for_bias += output["tokens_per_expert_global"]
 
+        # update log
+        update_loss_dict("loss", loss)
+        update_loss_dict("pg_loss", pg_loss)
+        update_loss_dict("pg_clipfrac", pg_clipfrac)
+        if args.use_kl_loss:
+            update_loss_dict("kl_loss", kl_loss)
+        if "balancing_loss" in output:
+            update_loss_dict("balancing_loss", balancing_loss)
+        if "z_loss" in output:
+            update_loss_dict("z_loss", z_loss)
+
         del output
+
+        # we already divide by the global token, need to remove the mean in fsdp gradient allreduce.
+        loss = loss * dist.get_world_size()
         loss.backward()
-        step_loss += loss.detach().clone()
 
     if moe_need_update_bias:
         avg_count_load = tokens_per_expert_global_for_bias.float().mean(1)
@@ -99,23 +103,24 @@ def train_step(args, model, model_cfg, data_batches: list[dict]):
         maxvio_all_layers = (max_load_i - avg_count_load) / avg_count_load
         maxvio = maxvio_all_layers.mean()
         model.update_bias(tokens_per_expert_global_for_bias, avg_count_load)  # type: ignore
-        other_log["maxvio"] = maxvio.item()
 
-    reduced_llm_loss = step_llm_loss
-    dist.all_reduce(reduced_llm_loss)
-    reduced_llm_loss.div_(dist.get_world_size())
+    grad_norm = clip_grad_norm(model, args.clip_grad)
 
-    loss_log["total_loss"] = step_loss.item()
-    loss_log["reduced_llm_loss"] = reduced_llm_loss.item()
-    if step_balancing_loss is not None:
-        reduced_balancing_loss = step_balancing_loss
-        dist.all_reduce(reduced_balancing_loss.div_(dist.get_world_size()))
-        loss_log["reduced_balancing_loss"] = reduced_balancing_loss.item()
-    if step_z_loss is not None:
-        reduced_z_loss = step_z_loss
-        dist.all_reduce(reduced_z_loss.div_(dist.get_world_size()))
-        loss_log["reduced_z_loss"] = reduced_z_loss.item()
-    return loss_log, other_log
+    if torch.isnan(grad_norm) or torch.isinf(grad_norm):
+        optimizer.zero_grad()
+    else:
+        optimizer.step()
+        optimizer.zero_grad()
+
+    # TODO: this is slow
+    reduced_loss_dict = [None] * dist.get_world_size()
+    dist.all_gather_object(reduced_loss_dict, loss_dict)
+    loss_dict = {key: sum([d[key] for d in reduced_loss_dict]) for key in loss_dict.keys()}
+    loss_dict["train/grad_norm"] = grad_norm.item()
+    if moe_need_update_bias:
+        loss_dict["maxvio"] = maxvio.item()
+
+    return loss_dict
 
 
 def clip_grad_norm(model, max_grad_norm):
@@ -125,7 +130,7 @@ def clip_grad_norm(model, max_grad_norm):
     grouped_grads = group_tensors_by_device_mesh_and_placements(grads)
     total_norms = []
     for grads in grouped_grads.values():
-        total_norm = cal_total_norm(grads, norm_type=2.0, foreach=True)
+        total_norm = cal_total_norm(grads, foreach=True)
         total_norms.append(total_norm)
     grad_norm = torch.linalg.vector_norm(torch.stack(total_norms), ord=2.0, dtype=torch.float32)
     clip_coef = max_grad_norm / (grad_norm + 1e-6)
@@ -153,8 +158,7 @@ def group_tensors_by_device_mesh_and_placements(tensors: List[torch.Tensor]):
     return grouped_tensors
 
 
-def cal_total_norm(tensors: List[DTensor], norm_type: float = 2.0, foreach: Optional[bool] = None):
-    norm_type = float(norm_type)
+def cal_total_norm(tensors: List[DTensor], foreach: Optional[bool] = None):
     if len(tensors) == 0:
         return torch.tensor(0.0)
 
@@ -165,46 +169,28 @@ def cal_total_norm(tensors: List[DTensor], norm_type: float = 2.0, foreach: Opti
     if (foreach is None and _has_foreach_support(tensors, device)) or (  # type: ignore
         foreach and _device_has_foreach_support(device)
     ):
-        norms = torch._foreach_norm(tensors, norm_type)  # type: ignore
+        norms = torch._foreach_norm(tensors, 2)  # type: ignore
     elif foreach:
         raise RuntimeError(f"foreach=True was passed, but can't use the foreach API on {device.type} tensors")
     else:
-        norms = tuple(torch.linalg.vector_norm(g, norm_type) for g in tensors)
+        norms = tuple(torch.linalg.vector_norm(g, 2) for g in tensors)
 
-    local_norm = torch.linalg.vector_norm(
-        torch.stack([norm.to_local() for norm in norms]), norm_type, dtype=torch.float32
-    )
-    if norm_type == 2:
-        local_norm_squared = local_norm**2
-        for i, placement in enumerate(placements):
-            if isinstance(placement, Shard):
-                # When using ep + fsdp, the placement corresponding to fsdp mesh is _StridedShard
-                # isinstance(_StridedShard, Shard) is True
-                dist.all_reduce(local_norm_squared, group=device_mesh.get_group(i))
-            elif isinstance(placement, Replicate):
-                pass
-            else:
-                raise ValueError(f"Unsupported placement type {placement} in clip_grad_norm")
-        global_norm = local_norm_squared**0.5
-    else:
-        raise NotImplementedError
+    local_norm = torch.linalg.vector_norm(torch.stack([norm.to_local() for norm in norms]), 2, dtype=torch.float32)
+    local_norm_squared = local_norm**2
+    for i, placement in enumerate(placements):
+        if isinstance(placement, Shard):
+            # When using ep + fsdp, the placement corresponding to fsdp mesh is _StridedShard
+            # isinstance(_StridedShard, Shard) is True
+            dist.all_reduce(local_norm_squared, group=device_mesh.get_group(i))
+        elif isinstance(placement, Replicate):
+            pass
+        else:
+            raise ValueError(f"Unsupported placement type {placement} in clip_grad_norm")
+    global_norm = local_norm_squared**0.5
     return global_norm
 
 
 def gather_logprobs(logits, shifted_labels):
-    logprobs = F.log_softmax(logits, dim=-1)
+    logprobs = F.log_softmax(logits.float(), dim=-1)
     logprobs = logprobs.gather(dim=-1, index=shifted_labels.clip(min=0).unsqueeze(-1)).squeeze(-1)
-    return logprobs
-
-
-def sp_split(
-    tensor,
-    sp_mesh: DeviceMesh,
-    split_dim: int,
-    padding_value: Any,
-):
-    if sp_mesh.size() == 1:
-        return tensor
-    tensor = pad_to_multiple_of(tensor, padding_value, sp_mesh.size(), split_dim)
-    tensor = split_for_sequence_parallel(tensor, dim=split_dim, sp_mesh=sp_mesh)
-    return tensor
+    return -logprobs

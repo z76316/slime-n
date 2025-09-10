@@ -32,4 +32,11 @@ def parse_args(add_custom_arguments=None):
     if args.load is None:
         args.load = args.hf_checkpoint
 
+    # TODO: mbs=1 for now
+    args.max_tokens_per_gpu = 0
+    # TODO: only support per token loss now
+    args.calculate_per_token_loss = True
+
+    assert args.sp_size == 1, f"sequence parallel not supported yet."
+
     return args
