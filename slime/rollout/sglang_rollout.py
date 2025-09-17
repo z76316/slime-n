@@ -1,9 +1,9 @@
 import asyncio
-import copy
 import base64
+import copy
 import io
-from PIL import Image
 
+from PIL import Image
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
@@ -127,7 +127,7 @@ async def generate(args, sample: Sample, sampling_params) -> Sample:
         payload["input_ids"] = prompt_token_ids
         if not sample.tokens:  # Initialize sample.tokens for the first turn
             sample.tokens = prompt_token_ids
-    
+
     output = await post(url, payload)
 
     # Extract new response tokens

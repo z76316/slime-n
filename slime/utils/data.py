@@ -42,13 +42,13 @@ class Dataset:
         self.origin_samples = []
         for data in read_file(path):
             if multimodal_keys:
-                 prompt_content = []
-                 if prompt_key in data:
-                     prompt_content.append({"type": "text", "text": data[prompt_key]})
-                 for media_type, data_key in multimodal_keys.items():
-                     if data_key in data:
-                         media_path=data[data_key]
-                         prompt_content.append({"type": media_type, "path": media_path})
+                prompt_content = []
+                if prompt_key in data:
+                    prompt_content.append({"type": "text", "text": data[prompt_key]})
+                for media_type, data_key in multimodal_keys.items():
+                    if data_key in data:
+                        media_path = data[data_key]
+                        prompt_content.append({"type": media_type, "path": media_path})
             else:
                 prompt_content = data.get(prompt_key)
 
@@ -63,10 +63,12 @@ class Dataset:
                 else:
                     tools = None
                 template_input = [{"role": "user", "content": prompt_content}] if multimodal_keys else prompt_content
-                prompt = tokenizer.apply_chat_template(template_input, tools, tokenize=False, add_generation_prompt=True)
+                prompt = tokenizer.apply_chat_template(
+                    template_input, tools, tokenize=False, add_generation_prompt=True
+                )
 
             else:
-                prompt=prompt_content
+                prompt = prompt_content
 
             # TODO: this is slow.
             if max_length is not None:
@@ -133,7 +135,7 @@ def process_rollout_data(args, rollout_data_ref, dp_rank, dp_size):
     rollout_data["raw_reward"] = data["raw_reward"]
 
     if "prompt" in data:
-        rollout_data["prompt"]=data["prompt"]
+        rollout_data["prompt"] = data["prompt"]
 
     total_lengths = [len(t) for t in data["tokens"]]
     data["total_lengths"] = total_lengths
@@ -183,7 +185,7 @@ def process_rollout_data(args, rollout_data_ref, dp_rank, dp_size):
         "round_number",
         "sample_indices",
         "rollout_log_probs",
-        "prompt"
+        "prompt",
     ]:
         if key not in data:
             continue
