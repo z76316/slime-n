@@ -70,11 +70,11 @@ def train(args):
 
         if args.use_critic:
             critic_train_handle = critic_model.async_train(rollout_id, rollout_data_ref)
-
-        ray.get(actor_model.async_train(rollout_id, rollout_data_ref))
-
-        if args.use_critic:
+            if rollout_id >= args.num_critic_only_steps:
+                ray.get(actor_model.async_train(rollout_id, rollout_data_ref))
             ray.get(critic_train_handle)
+        else:
+            ray.get(actor_model.async_train(rollout_id, rollout_data_ref))
 
         if args.save_interval is not None and (
             (rollout_id + 1) % args.save_interval == 0
@@ -85,9 +85,12 @@ def train(args):
                 ray.get(rollout_manager.save.remote(rollout_id))
 
         if args.offload:
-            ray.get(actor_model.async_offload())
             if args.use_critic:
                 ray.get(critic_model.async_offload())
+                if rollout_id >= args.num_critic_only_steps:
+                    ray.get(actor_model.async_offload())
+            else:
+                ray.get(actor_model.async_offload())
 
             ray.get(rollout_manager.onload.remote(tags=[GPU_MEMORY_TYPE_WEIGHTS]))
 

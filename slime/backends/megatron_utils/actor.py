@@ -53,6 +53,7 @@ class MegatronTrainRayActor(TrainRayActor):
         if role == "critic":
             self.args.load = self.args.critic_load
             self.args.save = self.args.critic_save
+            self.args.lr = self.args.critic_lr
 
         (self.model, self.optimizer, self.opt_param_scheduler, loaded_rollout_id) = initialize_model_and_optimizer(
             args, role
@@ -254,11 +255,16 @@ class MegatronTrainRayActor(TrainRayActor):
             self.model,
             data_iterator,
             num_microbatches,
-        )
-        values = [value.squeeze(-1) for value in values["values"]]
-        values, log_probs, ref_log_probs = sync_actor_critic_data(
-            self.args, values, None, None, self._actor_critic_groups
-        )
+        )["values"]
+
+        if rollout_id < self.args.num_critic_only_steps:
+            # we will only use the shape of log_probs in this situation
+            log_probs = values
+            ref_log_probs = values
+        else:
+            values, log_probs, ref_log_probs = sync_actor_critic_data(
+                self.args, values, None, None, self._actor_critic_groups
+            )
 
         rollout_data.update(
             {
