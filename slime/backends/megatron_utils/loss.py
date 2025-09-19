@@ -117,7 +117,7 @@ def get_values(
         response_lengths=response_lengths,
     ):
         assert logits_chunk.size(-1) == 1, f"{logits_chunk.shape}"
-        value_list.append(logits_chunk)
+        value_list.append(logits_chunk.squeeze(-1))
 
     return {
         "values": value_list,
@@ -366,12 +366,14 @@ def value_loss_function(args, batch, logits, sum_of_sample_mean):
 
     returns = torch.cat(batch["returns"], dim=0)
 
+    values_clipfrac = torch.abs(values - old_values) > args.value_clip
     values_clipped = old_values + (values - old_values).clamp(-args.value_clip, args.value_clip)
     surr1 = (values_clipped - returns) ** 2
     surr2 = (values - returns) ** 2
     loss = torch.max(surr1, surr2)
 
     loss = sum_of_sample_mean(loss)
+    values_clipfrac = sum_of_sample_mean(values_clipfrac.float())
 
     # make sure the gradient could backprop correctly.
     if values.numel() == 0:
@@ -379,6 +381,7 @@ def value_loss_function(args, batch, logits, sum_of_sample_mean):
 
     reported_loss = {
         "value_loss": loss.clone().detach(),
+        "value_clipfrac": values_clipfrac.clone().detach(),
     }
 
     return loss, reported_loss
