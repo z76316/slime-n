@@ -9,6 +9,7 @@ from torch_memory_saver import torch_memory_saver
 from transformers import AutoConfig, AutoModelForCausalLM, AutoProcessor, AutoTokenizer
 
 import wandb
+from slime.ray.registry import get_actors
 from slime.ray.train_actor import TrainRayActor
 from slime.utils.data import process_rollout_data
 from slime.utils.distributed_utils import get_gloo_group
@@ -95,6 +96,7 @@ class FSDPTrainRayActor(TrainRayActor):
         self.update_cpu_params_dict(self.weights["actor"])
 
         self.weight_updator = UpdateWeightFromTensor(self.args, self.model)
+        self.connected = False
 
         if self.args.offload:
             self.sleep(("model"))
@@ -121,15 +123,6 @@ class FSDPTrainRayActor(TrainRayActor):
             return
 
         raise NotImplementedError()
-
-    def connect_rollout_engines(self, rollout_engines, rollout_engine_lock):
-        self.rollout_engines = rollout_engines
-
-        if self.args.debug_train_only or self.args.debug_rollout_only:
-            return
-
-        self.weight_updator.connect_rollout_engines(rollout_engines, rollout_engine_lock)
-        dist.barrier(group=get_gloo_group())
 
     def compute_log_prob(
         self,
@@ -391,6 +384,13 @@ class FSDPTrainRayActor(TrainRayActor):
     def update_weights(self):  # type: ignore[override]
         if self.args.debug_train_only or self.args.debug_rollout_only:
             return
+
+        if not self.connected:
+            self.connected = True
+            rollout_engines = get_actors("rollout")
+            rollout_engine_lock = get_actors("rollout_lock", 0)
+            self.weight_updator.connect_rollout_engines(rollout_engines, rollout_engine_lock)
+            dist.barrier(group=get_gloo_group())
 
         if self.args.offload:
             # TODO: don't wake up here
