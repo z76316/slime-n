@@ -313,7 +313,7 @@ def _start_router(args):
     args.sglang_router_port = find_available_port(random.randint(3000, 4000))
 
     if args.use_slime_router:
-        from slime_plugins.slime_router.slime_router import run_slime_router as run_router
+        from slime.router.router import run_router
 
         router_args = args
 

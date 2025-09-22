@@ -644,6 +644,12 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 default=False,
                 help="Whether to use SlimeRouter for text-based routing instead of SGLang token-based routing",
             )
+            parser.add_argument(
+                "--slime-router-middleware-paths",
+                type=str,
+                nargs="+",
+                default=None,
+            )
             return parser
 
         # wandb
