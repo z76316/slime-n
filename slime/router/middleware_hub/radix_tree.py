@@ -532,23 +532,23 @@ class StringRadixTrie:
         for child in node.children:
             self._print_node(child, depth + 1)
 
-    def retrieve_from_text(self, text: str, return_logp: bool = False):
+    def retrieve_from_text(self, text: str, return_logprob: bool = False):
         """
         Get tokens from text by looking up in radix tree or using tokenizer.
         Also fetches weight version from worker during this operation.
         Args:
             text: Input text to get tokens for
-            return_logp: If True, also return log probabilities
+            return_logprob: If True, also return log probabilities
         Returns:
-            List of token IDs corresponding to the input text if return_logp is False.
-            Tuple of (token_ids, logp) if return_logp is True.
+            List of token IDs corresponding to the input text if return_logprob is False.
+            Tuple of (token_ids, logp) if return_logprob is True.
         """
         # Call find_longest_prefix to get the match result
         result = self.find_longest_prefix(text)
 
         # If we have a match and it covers the entire text, return the tokens
         if result.matched_prefix and result.token_ids:
-            if return_logp:
+            if return_logprob:
                 return (result.token_ids, result.logp)
             else:
                 return result.token_ids
@@ -562,7 +562,7 @@ class StringRadixTrie:
             # Insert the text and tokens into the tree
             self.insert(text, tokens)
             # Return the tokens
-            if return_logp:
+            if return_logprob:
                 # Return default logp values (0.0) when using tokenizer
                 return (tokens, [0.0] * len(tokens))
             else:
@@ -577,7 +577,7 @@ class StringRadixTrie:
             print("Tree structure after retrieve_from_text:")
             self.pretty_print()
 
-        if return_logp:
+        if return_logprob:
             return (result_tokens, result_logp)
         else:
             return result_tokens
