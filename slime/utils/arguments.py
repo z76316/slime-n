@@ -642,7 +642,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 "--use-slime-router",
                 action="store_true",
                 default=False,
-                help="Whether to use SlimeRouter for text-based routing instead of SGLang token-based routing"
+                help="Whether to use SlimeRouter for text-based routing instead of SGLang token-based routing",
             )
             return parser
 
