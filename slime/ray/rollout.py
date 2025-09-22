@@ -12,7 +12,7 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 import wandb
 from slime.backends.sglang_utils.sglang_engine import SGLangEngine
 from slime.ray.rollout_data_source import RolloutDataSourceWithBuffer
-from slime.utils.http_utils import find_available_port, get_host_info, init_http_client, run_router
+from slime.utils.http_utils import find_available_port, get_host_info, init_http_client
 from slime.utils.misc import load_function
 from slime.utils.ray_utils import Box
 from slime.utils.types import Sample
@@ -309,23 +309,33 @@ def _start_router(args):
     if args.sglang_router_ip is not None:
         return
 
-    from sglang_router.launch_router import RouterArgs
-
     args.sglang_router_ip = get_host_info()[1]
     args.sglang_router_port = find_available_port(random.randint(3000, 4000))
 
-    router_args = RouterArgs(
-        host=args.sglang_router_ip,
-        port=args.sglang_router_port,
-        balance_abs_threshold=0,
-        prometheus_port=find_available_port(random.randint(4000, 5000)),
-    )
+    if args.use_slime_router:
+        from slime_plugins.slime_router.slime_router import run_slime_router as run_router
 
-    if hasattr(router_args, "log_level"):
-        router_args.log_level = "warn"
+        router_args = args
 
-    if hasattr(router_args, "request_timeout_secs"):
-        router_args.request_timeout_secs = args.sglang_router_request_timeout_secs
+    else:
+        from sglang_router.launch_router import RouterArgs
+        from slime.utils.http_utils import run_router
+
+        args.sglang_router_ip = get_host_info()[1]
+        args.sglang_router_port = find_available_port(random.randint(3000, 4000))
+
+        router_args = RouterArgs(
+            host=args.sglang_router_ip,
+            port=args.sglang_router_port,
+            balance_abs_threshold=0,
+            prometheus_port=find_available_port(random.randint(4000, 5000)),
+        )
+
+        if hasattr(router_args, "log_level"):
+            router_args.log_level = "warn"
+
+        if hasattr(router_args, "request_timeout_secs"):
+            router_args.request_timeout_secs = args.sglang_router_request_timeout_secs
 
     process = multiprocessing.Process(
         target=run_router,
@@ -336,38 +346,7 @@ def _start_router(args):
     # Wait 3 seconds
     time.sleep(3)
     assert process.is_alive()
-    # If router ip is specified, use the specified launched router
-    print(f"SGLang router launched at {args.sglang_router_ip}:{args.sglang_router_port}")
-    
-    if getattr(args, 'use_slime_router', False):
-        from slime_plugins.slime_router.slime_router import run_slime_router
-        import argparse
-
-        slime_router_args = argparse.Namespace()
-        slime_router_args.host = get_host_info()[1]                        # slime router ip - same as sgl router
-        slime_router_args.port = find_available_port(random.randint(5000, 6000))  # slime router port - auto find
-
-        args.slime_router_host = slime_router_args.host
-        args.slime_router_port = slime_router_args.port
-
-        print(f"Slime router host and port {slime_router_args.host}: {slime_router_args.port}")
-        slime_router_args.sglang_host = args.sglang_router_ip                   # SGLang router ip
-        slime_router_args.sglang_port = args.sglang_router_port                 # SGLang router router
-        slime_router_args.tokenizer_name = args.hf_checkpoint
-
-        # TODO: verbose always = True for debug @ changyi
-        slime_router_args.verbose = False  # full log to debug
-        slime_router_args.enable_weight_version = True  # re-enable weight version
-
-        slime_process = multiprocessing.Process(
-            target=run_slime_router,
-            args=(slime_router_args,),
-        )
-        slime_process.daemon = True
-        slime_process.start()
-        time.sleep(3)
-        assert slime_process.is_alive()
-        print(f"Slime router launched at {slime_router_args.host}:{slime_router_args.port}")
+    print(f"Router launched at {args.sglang_router_ip}:{args.sglang_router_port}")
 
 
 def _log_eval_rollout_data(rollout_id, args, data):

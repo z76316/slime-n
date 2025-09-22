@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 """
@@ -7,10 +5,10 @@ String-based Radix Trie for efficient prefix matching and token caching.
 Optimized for string prefixes with corresponding token IDs.
 """
 
-import time
 import threading
-from typing import List, Optional, Dict, Any
+import time
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -45,7 +43,7 @@ class StringTreeNode:
 
         # Reference counting for protection from eviction
         self.ref_count = 0
-        
+
         # Weight version tracking
         self.weight_version: Optional[int] = None  # Weight version for this node
 
@@ -89,7 +87,6 @@ class StringTreeNode:
 class StringRadixTrie:
     """
     String-based Radix Trie for efficient prefix matching and token caching.
-
     Features:
     - Efficient string prefix matching
     - Token ID caching for matched prefixes
@@ -98,12 +95,9 @@ class StringRadixTrie:
     - Automatic garbage collection based on weight version thresholds
     """
 
-    def __init__(
-        self, max_cache_size: int = 10000, gc_threshold_k: int = 5, tokenizer=None, verbose: bool = False
-    ):
+    def __init__(self, max_cache_size: int = 10000, gc_threshold_k: int = 5, tokenizer=None, verbose: bool = False):
         """
         Initialize the String Radix Trie.
-
         Args:
             max_cache_size: Maximum number of cached token IDs (triggers GC when exceeded)
             gc_threshold_k: GC threshold - nodes with weight_version < (current_version - k) will be removed
@@ -125,18 +119,15 @@ class StringRadixTrie:
         self.cache_hits = 0
         self.cache_misses = 0
         self.cur_cache_size = 0  # Total number of token IDs across all nodes
-        
+
         # Thread safety
         self._lock = threading.RLock()
-
 
     def find_longest_prefix(self, text: str) -> MatchResult:
         """
         Find the longest cached prefix for the given text.
-
         Args:
             text: Input string to find prefix for
-
         Returns:
             MatchResult containing matched prefix, token IDs, logp, and remaining string
         """
@@ -182,12 +173,12 @@ class StringRadixTrie:
                 self.cache_misses += 1
 
             result = MatchResult(matched_prefix, matched_tokens, matched_logp, remaining_text, current_node)
-            
+
             # Print tree structure if verbose is enabled
             if self.verbose:
                 print("Tree structure after find_longest_prefix:")
                 self.pretty_print()
-                
+
             return result
 
     def insert(
@@ -199,13 +190,11 @@ class StringRadixTrie:
     ) -> bool:
         """
         Insert a string and its corresponding token IDs and log probabilities into the trie.
-
         Args:
             text: String to insert
             token_ids: Corresponding token IDs
             logp: Corresponding log probabilities (must match token_ids length)
             weight_version: Optional weight version for this insertion
-
         Returns:
             True if insertion was successful
         """
@@ -228,26 +217,27 @@ class StringRadixTrie:
                     print(f"[WARNING] Token IDs: {token_ids}")
                 return False
 
-
             # If logp is not provided, create default values (0.0)
             if logp is None:
                 logp = [0.0] * len(token_ids)
 
             result = self._insert(text, token_ids, logp, current_weight_version)
-            
+
             # Check if GC should be triggered after insert
             if self.cur_cache_size > self.max_cache_size and weight_version is not None:
                 if self.verbose:
-                    print(f"[RadixTree] Cache size {self.cur_cache_size} exceeds limit {self.max_cache_size}, triggering GC")
+                    print(
+                        f"[RadixTree] Cache size {self.cur_cache_size} exceeds limit {self.max_cache_size}, triggering GC"
+                    )
                 gc_removed = self.gc_by_weight_version(weight_version)
                 if self.verbose:
                     print(f"[RadixTree] GC removed {gc_removed} nodes, new cache size: {self.cur_cache_size}")
-            
+
             # Print tree structure if verbose is enabled
             if self.verbose:
                 print("Tree structure after insert:")
                 self.pretty_print()
-                
+
             return result
 
     def _insert(
@@ -259,7 +249,7 @@ class StringRadixTrie:
         remaining_text = text
         remaining_tokens = token_ids[:]  # Copy the tokens list
         remaining_logp = logp[:]  # Copy the logp list
-        
+
         # Track all nodes traversed during insert for weight version update
         traversed_nodes = [current_node]
 
@@ -278,7 +268,7 @@ class StringRadixTrie:
                 current_node = best_child
                 traversed_nodes.append(current_node)
                 remaining_text = remaining_text[best_key_len:]
-                
+
                 # Skip the tokens that this existing node covers
                 if best_child.has_value:
                     tokens_to_skip = len(best_child.token_ids)
@@ -289,7 +279,7 @@ class StringRadixTrie:
                 new_node = StringTreeNode()
                 new_node.parent = current_node
                 new_node.string_key = remaining_text
-                
+
                 if remaining_tokens:  # Only assign if there are tokens left
                     new_node.token_ids = remaining_tokens
                     new_node.logp = remaining_logp
@@ -301,7 +291,7 @@ class StringRadixTrie:
                 traversed_nodes.append(new_node)
                 self.total_entries += 1
                 break
-        
+
         # If we've traversed the entire text and the last node doesn't have tokens,
         # assign remaining tokens to it
         if remaining_text == "" and not current_node.has_value:
@@ -321,10 +311,8 @@ class StringRadixTrie:
     def remove(self, text: str) -> bool:
         """
         Remove a string and all nodes with this text as prefix from the trie.
-
         Args:
             text: String to remove (will also remove all strings starting with this text)
-
         Returns:
             True if any removal was performed
         """
@@ -332,22 +320,20 @@ class StringRadixTrie:
             node = self._find_node_by_text(text)
             if node:
                 removed_count = self._clean_node_subtree(node)
-                
+
                 # Print tree structure if verbose is enabled
                 if self.verbose:
                     print("Tree structure after remove:")
                     self.pretty_print()
-                    
+
                 return removed_count > 0
             return False
 
     def _find_node_by_text(self, text: str) -> Optional[StringTreeNode]:
         """
         Find node by exact text match.
-
         Args:
             text: Text to find
-
         Returns:
             Node if found, None otherwise
         """
@@ -360,10 +346,8 @@ class StringRadixTrie:
         """
         Clean a node and all its descendants.
         This is the core cleanup function.
-
         Args:
             node: Node to clean (including all descendants)
-
         Returns:
             Number of nodes removed
         """
@@ -374,10 +358,8 @@ class StringRadixTrie:
     def _remove_node_and_descendants(self, node: StringTreeNode) -> int:
         """
         Remove a node and all its descendants from the trie.
-
         Args:
             node: The node to remove along with all its descendants
-
         Returns:
             Number of nodes removed
         """
@@ -416,10 +398,8 @@ class StringRadixTrie:
         """
         Perform garbage collection based on weight version.
         Remove nodes with weight_version < (current_weight_version - gc_threshold_k).
-        
         Args:
             current_weight_version: Current weight version to use for GC threshold
-        
         Returns:
             Number of nodes removed
         """
@@ -428,76 +408,74 @@ class StringRadixTrie:
                 if self.verbose:
                     print("[RadixTree GC] No weight version provided, skipping GC")
                 return 0
-                
+
             gc_threshold = current_weight_version - self.gc_threshold_k
             if self.verbose:
-                print(f"[RadixTree GC] Starting GC with threshold: {gc_threshold} (current_version: {current_weight_version}, k: {self.gc_threshold_k})")
-            
+                print(
+                    f"[RadixTree GC] Starting GC with threshold: {gc_threshold} (current_version: {current_weight_version}, k: {self.gc_threshold_k})"
+                )
+
             nodes_to_remove = self._find_outdated_nodes(gc_threshold)
             removed_count = 0
-            
+
             for node in nodes_to_remove:
                 # Validate that subtree weight versions are <= parent weight version
                 self._validate_subtree_weight_versions(node)
                 removed_count += self._clean_node_subtree(node)
-                
+
             if self.verbose:
                 print(f"[RadixTree GC] Completed GC, removed {removed_count} nodes")
-                
+
             return removed_count
 
     def _find_outdated_nodes(self, gc_threshold: int) -> List[StringTreeNode]:
         """
         Find nodes that should be removed based on weight version threshold.
         Uses layer-by-layer traversal - if parent is outdated, children are not checked.
-        
         Args:
             gc_threshold: Weight version threshold (nodes < this value will be removed)
-            
         Returns:
             List of nodes to remove
         """
         outdated_nodes = []
-        
+
         def check_node(node):
             if node == self.root:
                 # Root is never removed, check its children
                 for child in node.children:
                     check_node(child)
                 return
-                
+
             # Check if this node should be removed
-            if (node.weight_version is not None and 
-                node.weight_version <= gc_threshold and 
-                node.has_value):
+            if node.weight_version is not None and node.weight_version <= gc_threshold and node.has_value:
                 outdated_nodes.append(node)
                 return  # Don't check children since entire subtree will be removed
-                
+
             # Node is not outdated, check its children
             for child in node.children:
                 check_node(child)
-                
+
         check_node(self.root)
         return outdated_nodes
 
     def _validate_subtree_weight_versions(self, node: StringTreeNode):
         """
         Validate that all nodes in subtree have weight_version <= parent weight_version.
-        
         Args:
             node: Root node of subtree to validate
         """
+
         def validate_recursive(current_node, parent_weight_version):
             if current_node.weight_version is not None and parent_weight_version is not None:
                 assert current_node.weight_version <= parent_weight_version, (
                     f"Child node weight_version {current_node.weight_version} > "
                     f"parent weight_version {parent_weight_version}"
                 )
-            
+
             # Recursively validate children
             for child in current_node.children:
                 validate_recursive(child, current_node.weight_version)
-                
+
         # Start validation from the node itself
         validate_recursive(node, node.weight_version)
 
@@ -554,30 +532,27 @@ class StringRadixTrie:
         for child in node.children:
             self._print_node(child, depth + 1)
 
-
     def retrieve_from_text(self, text: str, return_logp: bool = False):
         """
         Get tokens from text by looking up in radix tree or using tokenizer.
         Also fetches weight version from worker during this operation.
-        
         Args:
             text: Input text to get tokens for
             return_logp: If True, also return log probabilities
-            
         Returns:
             List of token IDs corresponding to the input text if return_logp is False.
             Tuple of (token_ids, logp) if return_logp is True.
         """
         # Call find_longest_prefix to get the match result
         result = self.find_longest_prefix(text)
-        
+
         # If we have a match and it covers the entire text, return the tokens
         if result.matched_prefix and result.token_ids:
             if return_logp:
                 return (result.token_ids, result.logp)
             else:
                 return result.token_ids
-            
+
         # If result is empty and input text is not empty, tokenize with tokenizer
         # This is needed because we cannot get the prompt token id from engine response
         # We have to manually insert the text and token into the tree
@@ -592,31 +567,32 @@ class StringRadixTrie:
                 return (tokens, [0.0] * len(tokens))
             else:
                 return tokens
-            
+
         # If no tokenizer or other cases, return the matched tokens (could be empty)
         result_tokens = result.token_ids if result else []
         result_logp = result.logp if result else []
-        
+
         # Print tree structure if verbose is enabled
         if self.verbose:
             print("Tree structure after retrieve_from_text:")
             self.pretty_print()
-            
+
         if return_logp:
             return (result_tokens, result_logp)
         else:
             return result_tokens
 
+
 # Example usage and testing
 if __name__ == "__main__":
     # Create trie instance for testing
     trie = StringRadixTrie(max_cache_size=100, verbose=True)
-    
+
     # Test token retrieval
     print("\nTesting token retrieval:")
     test_tokens = trie.retrieve_from_text("Hello world")
     print(f"Tokens for 'Hello world': {test_tokens}")
-    
+
     # Example usage with simplified insert
     test_cases = [
         ("Hello world", [1, 2, 3], [-0.1, -0.2, -0.3]),
@@ -666,9 +642,8 @@ if __name__ == "__main__":
     stats = trie.get_stats()
     for key, value in stats.items():
         print(f"{key}: {value}")
-    
+
     # Test GC with weight version
     print("\nTesting GC with weight version 5:")
     gc_removed = trie.gc_by_weight_version(5)
     print(f"GC removed {gc_removed} nodes")
-
