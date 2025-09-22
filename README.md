@@ -74,7 +74,7 @@ For complete usage instructions, please refer to the [Usage Documentation](docs/
   ```bibtext
   @misc{slime_github,
     author       = {Zilin Zhu and Chengxing Xie and Xin Lv and slime Contributors},
-    title        = {slime: An LLM post-training framework for RL Scaling.},
+    title        = {slime: An LLM post-training framework for RL Scaling},
     year         = {2025},
     howpublished = {\url{https://github.com/THUDM/slime}},
     note         = {GitHub repository. Corresponding author: Xin Lv},

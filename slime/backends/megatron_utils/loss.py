@@ -417,7 +417,7 @@ def sft_loss_function(args, batch, logits, sum_of_sample_mean):
 
 
 def loss_function(args, batch, num_microbatches, logits):
-    num_tokens = sum(batch["response_lengths"])
+    num_tokens = sum([torch.clamp_min(loss_mask.sum(), 1) for loss_mask in batch["loss_masks"]])
     num_samples = len(batch["response_lengths"])
 
     sum_of_sample_mean = get_sum_of_sample_mean(
