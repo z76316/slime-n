@@ -32,7 +32,7 @@ class RolloutManager:
         self.args = args
         _start_router(args)
         init_wandb_secondary(args, wandb_run_id)
-        init_http_client(args.sglang_server_concurrency * args.rollout_num_gpus // args.rollout_num_gpus_per_engine)
+        init_http_client(args)
 
         self.data_source = RolloutDataSourceWithBuffer(args)
 
