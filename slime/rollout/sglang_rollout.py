@@ -42,8 +42,9 @@ class GenerateState(metaclass=SingletonMeta):
             spaces_between_special_tokens=False,
         )
 
-        sampling_seed_base = args.rollout_seed
-        self.group_sampling_seeds = [sampling_seed_base + i for i in range(args.n_samples_per_prompt)]
+        if getattr(args, "sglang_enable_deterministic_inference", False):
+            sampling_seed_base = args.rollout_seed
+            self.group_sampling_seeds = [sampling_seed_base + i for i in range(args.n_samples_per_prompt)]
 
         self.reset()
 
@@ -215,19 +216,12 @@ async def generate_and_rm_group(args, group: list[Sample], sampling_params: dict
     if state.aborted:
         return group
 
-    seeds = state.group_sampling_seeds
-    assert seeds, "group_sampling_seeds should not be empty"
-    if len(group) > len(seeds):
-        raise ValueError(
-            f"The rollout group contains {len(group)} samples but only {len(seeds)} sampling seeds are available."
-        )
-
     tasks = []
     for idx, sample in enumerate(group):
-        seed = seeds[idx]
         current_sampling_params = sampling_params.copy()
-        current_sampling_params["sampling_seed"] = seed
-        sample.metadata["sampling_seed"] = seed
+        if getattr(args, "sglang_enable_deterministic_inference", False):
+            seed = state.group_sampling_seeds[idx]
+            current_sampling_params["sampling_seed"] = seed
         tasks.append(generate_and_rm(args, sample, current_sampling_params, evaluation=evaluation))
 
     group = await asyncio.gather(*tasks)
