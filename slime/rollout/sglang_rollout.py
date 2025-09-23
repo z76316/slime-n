@@ -424,7 +424,7 @@ async def eval_rollout_single_dataset(args, rollout_id, name, path):
 
     data.sort(key=lambda sample: sample.index)
 
-    reward_key = args.reward_key or args.eval_reward_key
+    reward_key = args.eval_reward_key or args.reward_key
     return {
         name: {
             "rewards": [sample.reward if not reward_key else sample.reward[reward_key] for sample in data],

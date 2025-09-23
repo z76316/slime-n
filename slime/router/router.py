@@ -35,7 +35,11 @@ class SlimeRouter:
 
         # TODO: remove this hardcode
         self.client = httpx.AsyncClient(
-            limits=httpx.Limits(max_connections=16384),
+            limits=httpx.Limits(
+                max_connections=args.sglang_server_concurrency
+                * args.rollout_num_gpus
+                // args.rollout_num_gpus_per_engine
+            ),
             timeout=httpx.Timeout(None),
         )
 
