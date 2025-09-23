@@ -397,7 +397,6 @@ async def eval_rollout_single_dataset(args, rollout_id, name, path):
         skip_special_tokens=args.rollout_skip_special_tokens,
         no_stop_trim=True,
         spaces_between_special_tokens=False,
-        sampling_seed=args.rollout_seed,
     )
 
     tasks = []
@@ -409,6 +408,9 @@ async def eval_rollout_single_dataset(args, rollout_id, name, path):
             sample = copy.deepcopy(prompt_sample)
             sample.index = sample_index
             sample_index += 1
+            if getattr(args, "sglang_enable_deterministic_inference", False):
+                sampling_params = sampling_params.copy()
+                sampling_params["sampling_seed"] = args.rollout_seed + j
             tasks.append(
                 generate_and_rm(
                     args,
