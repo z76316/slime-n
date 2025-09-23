@@ -23,7 +23,9 @@ And set the following environment variables:
      }
 ```
 
-Here we provide a guide to do RL training on Qwen2.5 0.5B model and GSM8K dataset with full deterministic.
+We also need to set `--use-slime-router` until the pypi whl of sglang-router updates.
+
+Here we provide the script to do RL training on Qwen2.5 0.5B model and GSM8K dataset with full deterministic.
 
 For data and checkpoint preparation, please run:
 
