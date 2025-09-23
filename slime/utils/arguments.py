@@ -767,6 +767,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
 
         def add_network_arguments(parser):
             parser.add_argument("--http-proxy", type=str, default=None)
+            parser.add_argument("--use-distributed-post", action="store_true", default=False)
             return parser
 
         def add_reward_model_arguments(parser):
