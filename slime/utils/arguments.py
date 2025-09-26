@@ -635,6 +635,12 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 default=0,
                 help="Lower bound clipping threshold C for importance sampling ratios to control variance.",
             )
+
+            parser.add_argument(
+                "--use-routing-replay",
+                action="store_true",
+                default=False,
+            )
             return parser
 
         def add_router_arguments(parser):
