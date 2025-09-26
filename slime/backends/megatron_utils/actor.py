@@ -1,3 +1,4 @@
+import os
 import socket
 import time
 from contextlib import nullcontext
@@ -305,6 +306,8 @@ class MegatronTrainRayActor(TrainRayActor):
         with timer("train"):
             if self.args.compute_advantages_and_returns:
                 if "ref" in self.weights:
+                    if self.args.use_routing_replay:
+                        os.environ["ROUTING_REPLAY_STAGE"] = "fallthrough"
                     ref_log_probs = self.compute_log_prob(
                         "ref",
                         data_iterator,
@@ -313,6 +316,8 @@ class MegatronTrainRayActor(TrainRayActor):
                     )
                     rollout_data.update(ref_log_probs)
 
+                if self.args.use_routing_replay:
+                    os.environ["ROUTING_REPLAY_STAGE"] = "record"
                 log_probs = self.compute_log_prob(
                     "old_actor" if self.args.keep_old_actor else "actor",
                     data_iterator,
@@ -348,6 +353,8 @@ class MegatronTrainRayActor(TrainRayActor):
                 self.prof.step()
 
             # Train
+            if self.args.use_routing_replay:
+                os.environ["ROUTING_REPLAY_STAGE"] = "replay_backward"
             with timer("actor_train"):
                 train(
                     rollout_id,
@@ -382,6 +389,11 @@ class MegatronTrainRayActor(TrainRayActor):
                 ),
                 path,
             )
+
+        if self.args.use_routing_replay:
+            from megatron.core.transformer.moe.moe_utils import RoutingReplay
+
+            RoutingReplay.clear_all()
 
         # update the cpu actor weight to the latest model
         self.update_cpu_params_dict(self.weights["actor"])
