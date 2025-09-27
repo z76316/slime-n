@@ -19,7 +19,7 @@ from slime.utils.timer import Timer, timer
 from slime.utils.wandb_utils import init_wandb_secondary
 
 from .data_packing import pack_sequences, unpack_sequences
-from .update_weight_utils import UpdateWeightFromTensor
+from .update_weight_utils import UpdateWeightFromDistributed, UpdateWeightFromTensor
 
 
 class FSDPTrainRayActor(TrainRayActor):
@@ -99,8 +99,12 @@ class FSDPTrainRayActor(TrainRayActor):
 
         self.update_cpu_params_dict(self.weights["actor"])
 
-        self.weight_updator = UpdateWeightFromTensor(self.args, self.model)
         self.connected = False
+        self.weight_updator = (
+            UpdateWeightFromTensor(self.args, self.model)
+            if self.args.colocate
+            else UpdateWeightFromDistributed(self.args, self.model)
+        )
 
         # Initialize data packing parameters
         self.max_tokens_per_gpu = args.max_tokens_per_gpu  # From main arguments
