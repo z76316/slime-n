@@ -58,8 +58,10 @@ class RolloutManager:
         # fault tolerance
         self._health_monitor_thread = None
         self._health_monitor_stop_event = None
-        self._health_check_interval = getattr(args, "rollout_health_check_interval", 10.0)
-        self._health_check_timeout = getattr(args, "rollout_health_check_timeout", 5.0)
+        self._health_check_interval = args.rollout_health_check_interval
+        self._health_check_timeout = args.rollout_health_check_timeout
+        self._health_check_is_first = True
+        self._health_check_first_wait = args.rollout_health_check_first_wait
 
     def get_rollout_engines_and_lock(self):
         return self.rollout_engines, self.rollout_engine_lock, self.num_new_engines
@@ -135,6 +137,11 @@ class RolloutManager:
 
     def _health_monitor_loop(self) -> None:
         assert self._health_monitor_stop_event is not None
+        # TODO: need to be waiting for the large moe to be ready. this is hacky.
+        if self._health_check_is_first:
+            if self._health_monitor_stop_event.wait(self._health_check_first_wait):
+                return
+            self._health_check_is_first = False
         while not self._health_monitor_stop_event.is_set():
             self._run_health_checks()
             if self._health_monitor_stop_event.wait(self._health_check_interval):
