@@ -228,6 +228,12 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 default=5.0,
                 help="Timeout in seconds to wait for a rollout engine /health_generate response before killing it.",
             )
+            parser.add_argument(
+                "--rollout-health-check-first-wait",
+                type=float,
+                default=300.0,
+                help="Time to wait for the compilation before the actual health check.",
+            )
 
             # sampling
             parser.add_argument(
