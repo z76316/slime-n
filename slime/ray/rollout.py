@@ -46,9 +46,12 @@ class RolloutManager:
         print(f"import {self.args.rollout_function_path} as generate_rollout function.")
         print(f"import {self.args.eval_function_path} as eval_generate_rollout function.")
 
-        num_gpu_per_engine = min(args.rollout_num_gpus_per_engine, args.num_gpus_per_node)
-        num_engines = args.rollout_num_gpus // num_gpu_per_engine
-        self.all_rollout_engines = [None] * num_engines
+        if self.args.debug_train_only:
+            self.all_rollout_engines = []
+        else:
+            num_gpu_per_engine = min(args.rollout_num_gpus_per_engine, args.num_gpus_per_node)
+            num_engines = args.rollout_num_gpus // num_gpu_per_engine
+            self.all_rollout_engines = [None] * num_engines
         self.num_new_engines = init_rollout_engines(args, pg, self.all_rollout_engines)
         self.nodes_per_engine = max(1, args.rollout_num_gpus_per_engine // args.num_gpus_per_node)
         # when doing multi-node serving, we will only send request to node-0 for each engine.
@@ -283,7 +286,7 @@ class RolloutManager:
 
 def init_rollout_engines(args, pg, all_rollout_engines):
     if args.debug_train_only:
-        return []
+        return 0
 
     num_gpu_per_engine = min(args.rollout_num_gpus_per_engine, args.num_gpus_per_node)
     num_engines = args.rollout_num_gpus // num_gpu_per_engine
