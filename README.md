@@ -10,11 +10,16 @@
 1.  **High-Performance Training**: Supports efficient training in various modes by connecting Megatron with SGLang;
 2.  **Flexible Data Generation**: Enables arbitrary training data generation workflows through custom data generation interfaces and server-based engines.
 
+slime is the RL-framework behind [GLM-4.5](https://z.ai/blog/glm-4.5) and [GLM-4.6](https://z.ai/blog/glm-4.6) and apart from models from Z.ai, we also supports the following models:
+- Qwen3 series (Qwen3Next, Qwen3MoE, Qwen3), Qwen2.5 series;
+- DeepSeek V3 series (DeepSeek V3, V3.1, DeepSeek R1);
+- Llama 3.
+
 ## Blogs
 
 - Our vision: [slime: An SGLang-Native Post-Training Framework for RL Scaling](https://lmsys.org/blog/2025-07-09-slime/).
-- Our ideas on agentic training: [Agent-Oriented Design: An Asynchronous and Decoupled Framework for Agentic RL](https://www.notion.so/Agent-Oriented-Design-An-Asynchronous-and-Decoupled-Framework-for-Agentic-RL-2278e692d081802cbdd5d37cef76a547).
-- slime has served as the RL framework for GLM-4.5: [GLM-4.5: Reasoning, Coding, and Agentic Abilities](https://z.ai/blog/glm-4.5)
+- Our ideas on agentic training: [Agent-Oriented Design: An Asynchronous and Decoupled Framework for Agentic RL](https://www.notion.so/Agent-Oriented-Design-An-Asynchronous-and-Decoupled-Framework-for-Agentic-RL-2278e692d081802cbdd5d37cef76a547)
+- v0.1.0 release note: [v0.1.0: Redefining High-Performance RL Training Frameworks](https://thudm.github.io/slime/blogs/release_v0.1.0.html)
 
 ## Table of Contents
 
