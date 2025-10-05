@@ -10,6 +10,18 @@
 1. **高性能训练**：通过连接 Megatron 与 SGLang，支持各种模式的高效训练；
 2. **灵活的数据生成**：通过自定义数据生成接口以及 server based engine，实现任意的数据训练数据生成流程。
 
+slime 是 [GLM-4.5](https://z.ai/blog/glm-4.5) 与 [GLM-4.6](https://z.ai/blog/glm-4.6) 背后的 RL 训练框架，除此之外，slime 还支持:
+- Qwen3 系列 (Qwen3Next, Qwen3MoE, Qwen3), Qwen2.5 系列；
+- DeepSeek V3 系列 (DeepSeek V3, V3.1, DeepSeek R1)；
+- Llama 3。
+
+## 博文
+
+- 我们的愿景：[slime：为 RL Scaling 设计的 SGLang-Native 后训练框架](https://thudm.github.io/slime/zh/blogs/introducing_slime.html)
+- 关于纯异步 agentic 训练的一些想法：[Agent-Oriented Design: An Asynchronous and Decoupled Framework for Agentic RL](https://www.notion.so/Agent-Oriented-Design-An-Asynchronous-and-Decoupled-Framework-for-Agentic-RL-2278e692d081802cbdd5d37cef76a547)
+- v0.1.0 日志：[slime v0.1.0: 重新定义高性能 RL 训练框架](https://zhuanlan.zhihu.com/p/1945237948166547268)
+
+
 ## 目录
 
 - [架构总览](#架构总览)
