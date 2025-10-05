@@ -973,7 +973,7 @@ def parse_args(add_custom_arguments=None):
         from slime.backends.megatron_utils import validate_args as megatron_validate_args
 
         args = megatron_parse_args(extra_args_provider=add_slime_arguments)
-        if getattr(args, "hf_checkpoint", None):
+        if args.hf_checkpoint:
             hf_config = AutoConfig.from_pretrained(args.hf_checkpoint, trust_remote_code=True)
             if args.use_hf_config_for_megatron:
                 from slime.backends.megatron_utils.config_mapping import get_mapper
