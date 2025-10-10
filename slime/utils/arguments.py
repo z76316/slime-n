@@ -672,7 +672,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 "--slime-router-middleware-paths",
                 type=str,
                 nargs="+",
-                default=None,
+                default="",
             )
             return parser
 
