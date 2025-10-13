@@ -238,7 +238,7 @@ class FSDPTrainRayActor(TrainRayActor):
         rank = dist.get_rank()
 
         rollout_data = process_rollout_data(self.args, rollout_data_ref, rank, world_size)
-        if self.args.advantage_estimator in ["grpo"]:
+        if self.args.advantage_estimator in ["grpo", "gspo"]:
             rollout_data["advantages"] = rollout_data["returns"] = [
                 torch.tensor([rollout_data["rewards"][i]] * rollout_data["response_lengths"][i])
                 for i in range(len(rollout_data["rewards"]))
@@ -303,19 +303,29 @@ class FSDPTrainRayActor(TrainRayActor):
             packed_batch["cur_log_probs"] = log_probs
             unpacked_batches = unpack_sequences(packed_batch)
 
-            if self.args.advantage_estimator == "gspo":
-                raise NotImplementedError("implement gspo")
-            else:
-                old_log_probs = torch.cat([batch["log_probs"] for batch in unpacked_batches], dim=0)
-                log_probs = torch.cat([batch["cur_log_probs"] for batch in unpacked_batches], dim=0)
-                advantages = torch.cat([batch["advantages"] for batch in unpacked_batches], dim=0)
-
+            old_log_probs = torch.cat([batch["log_probs"] for batch in unpacked_batches], dim=0)
+            log_probs = torch.cat([batch["cur_log_probs"] for batch in unpacked_batches], dim=0)
+            advantages = torch.cat([batch["advantages"] for batch in unpacked_batches], dim=0)
             loss_masks = [batch["loss_masks"].to(device=log_probs.device) for batch in unpacked_batches]
             response_lengths = [batch["response_lengths"] for batch in unpacked_batches]
 
-            # Ensure device consistency
+            advantages = advantages.to(device=log_probs.device)
             ppo_kl = old_log_probs.to(device=log_probs.device) - log_probs
-            advantages = advantages.to(device=ppo_kl.device)
+
+            if self.args.advantage_estimator == "gspo":
+                log_ratio_splits = torch.split(ppo_kl, response_lengths, dim=0)
+
+                seq_kls = [
+                    ((log_ratio_i * mask_i).sum() / mask_i.sum().clamp_min(1))
+                    for log_ratio_i, mask_i in zip(log_ratio_splits, loss_masks)
+                ]
+
+                ppo_kl_list = []
+                for seq_kl, length in zip(seq_kls, response_lengths):
+                    ppo_kl_list.append(seq_kl.expand(length))
+
+                ppo_kl = torch.cat(ppo_kl_list)
+
             pg_loss, pg_clipfrac = compute_policy_loss(ppo_kl, advantages, self.args.eps_clip, self.args.eps_clip_high)
 
             # Apply TIS before sample mean calculation
