@@ -382,6 +382,17 @@ class MegatronTrainRayActor(TrainRayActor):
         # update the cpu actor weight to the latest model
         self.update_cpu_params_dict(self.weights["actor"])
 
+        # Update ref model if needed
+        if (
+            self.args.ref_update_interval is not None
+            and (rollout_id + 1) % self.args.ref_update_interval == 0
+            and "ref" in self.weights
+        ):
+            with timer("ref_model_update"):
+                if is_megatron_main_rank():
+                    print(f"Updating ref model at rollout_id {rollout_id}")
+                self.update_cpu_params_dict(self.weights["ref"])
+
         log_perf_data(rollout_id, self.args)
         Timer().start("train_wait")
 
