@@ -1,6 +1,6 @@
 from argparse import Namespace
 from collections.abc import Callable, Iterator
-from typing import Union
+from typing import Optional, Union
 
 import torch
 from megatron.core import mpu
@@ -120,6 +120,7 @@ def get_log_probs_and_entropy(
         sample. If `with_entropy` is True, also includes "entropy" key with
         a list of `[R]` tensors.
     """
+    assert non_loss_data
     log_probs_list = []
     entropy_list = []
     for logits_chunk, tokens_chunk in get_responses(
@@ -151,7 +152,6 @@ def get_values(
     unconcat_tokens: list[torch.Tensor],
     total_lengths: list[int],
     response_lengths: list[int],
-    with_entropy: bool = False,
     non_loss_data: bool = True,
 ) -> dict[str, list[torch.Tensor]]:
     """Extract per-token value predictions over response tokens.
@@ -210,13 +210,13 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
             "total_lengths"). Modified in-place to add "advantages" and
             "returns" keys, each mapping to lists of tensors per sample.
     """
-    log_probs: list[torch.Tensor] = rollout_data.get("log_probs", None)
-    ref_log_probs: list[torch.Tensor] = rollout_data.get("ref_log_probs", None)
-    rewards: list[float] = rollout_data.get("rewards", None)
-    values: Union[None, list[torch.Tensor]] = rollout_data.get("values", None)
-    response_lengths: list[int] = rollout_data.get("response_lengths", None)
-    loss_masks: list[torch.Tensor] = rollout_data.get("loss_masks", None)
-    total_lengths: list[int] = rollout_data.get("total_lengths", None)
+    log_probs: list[torch.Tensor] = rollout_data.get("log_probs")
+    ref_log_probs: list[torch.Tensor] = rollout_data.get("ref_log_probs")
+    rewards: list[float] = rollout_data.get("rewards")
+    values: Union[None, list[torch.Tensor]] = rollout_data.get("values")
+    response_lengths: list[int] = rollout_data.get("response_lengths")
+    loss_masks: list[torch.Tensor] = rollout_data.get("loss_masks")
+    total_lengths: list[int] = rollout_data.get("total_lengths")
 
     # return when not the last pp stage.
     if log_probs is None and values is None:
