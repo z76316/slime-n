@@ -66,6 +66,7 @@ class MegatronTrainRayActor(TrainRayActor):
             self.args.load = self.args.critic_load
             self.args.save = self.args.critic_save
             self.args.lr = self.args.critic_lr
+            self.args.lr_warmup_iters = self.args.critic_lr_warmup_iters
 
         (self.model, self.optimizer, self.opt_param_scheduler, loaded_rollout_id) = initialize_model_and_optimizer(
             args, role
