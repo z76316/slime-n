@@ -668,6 +668,24 @@ class FSDPTrainRayActor(TrainRayActor):
             self.update_gpu_params_dict(current_weights)
 
 
+@torch.compile(dynamic=True)
+def selective_log_softmax(logits: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
+    """Fused version of the common `log_softmax -> gather` operation.
+
+    The fused version of this operation avoids the (potentially large) memory overhead
+    of allocating a new tensor to store the full logprobs.
+
+    Parameters:
+        logits: Tensor of shape [..., V] containing model logits.
+        input_ids: Tensor of shape [...] of token indices whose log-probabilities are gathered.
+
+    Returns:
+        Tensor of shape [...] containing the log-probabilities corresponding to `input_ids`.
+    """
+    logprobs = logits.log_softmax(dim=-1)
+    return torch.gather(logprobs, dim=-1, index=input_ids.unsqueeze(-1)).squeeze(-1)
+
+
 def gather_log_probs_packed(
     logits: torch.Tensor,
     input_ids: torch.Tensor,
@@ -695,14 +713,11 @@ def gather_log_probs_packed(
         logits = logits.div(temperature)
 
     # Shift for next-token prediction: logits[:-1] predicts input_ids[1:]
-    log_probs = torch.log_softmax(logits[:-1], dim=-1)
-    targets = input_ids[1:].to(device=log_probs.device)
+    shifted_logits = logits[:-1]
+    targets = input_ids[1:].to(device=shifted_logits.device)
 
     # Gather log probs for targets
-    gathered = log_probs.gather(-1, targets.unsqueeze(-1)).squeeze(-1)
-
-    # Apply mask to exclude first tokens
-    return gathered
+    return selective_log_softmax(shifted_logits, targets)
 
 
 def sum_of_sample_mean(x: torch.Tensor, response_lengths: list[int], loss_masks: list[torch.Tensor]) -> torch.Tensor:
