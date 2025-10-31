@@ -113,6 +113,7 @@ SGLANG_ARGS=(
    --sglang-speculative-num-steps 3
    --sglang-speculative-eagle-topk 1
    --sglang-speculative-num-draft-tokens 4
+   --sglang-speculative-enable-weights-update
 )
 
 MISC_ARGS=(
@@ -124,6 +125,11 @@ MISC_ARGS=(
    --attention-softmax-in-fp32
    # need to comment this when using model with MLA
    --attention-backend flash
+)
+
+SPEC_ARGS=(
+   --enable-mtp-training
+   --mtp-loss-scaling-factor 0.2
 )
 
 # launch the master node of ray in container
@@ -154,4 +160,5 @@ ray job submit --address="http://127.0.0.1:8265" \
    ${PERF_ARGS[@]} \
    ${EVAL_ARGS[@]} \
    ${SGLANG_ARGS[@]} \
-   ${MISC_ARGS[@]}
+   ${MISC_ARGS[@]} \
+   ${SPEC_ARGS[@]}

@@ -486,6 +486,7 @@ def _log_rollout_data(rollout_id, args, samples, rollout_extra_metrics, rollout_
         log_dict["perf/tokens_per_gpu_per_sec"] = sum(response_lengths) / rollout_time / args.rollout_num_gpus
     log_dict["perf/longest_sample_tokens_per_sec"] = max(response_lengths) / rollout_time
     log_dict |= _compute_zero_std_metrics(args, samples)
+    log_dict |= _compute_spec_metrics(args, samples)
     log_dict |= dict_add_prefix(_compute_reward_cat_metrics(args, samples), f"rollout/")
     print(f"perf {rollout_id}: {log_dict}")
     step = (
@@ -519,6 +520,20 @@ def _compute_zero_std_metrics(args, all_samples: List[Sample]):
     interesting_rewards = [str(round(g[0].get_reward_value(args), 1)) for g in interesting_sample_groups]
 
     return {f"rollout/zero_std/count_{reward}": len(items) for reward, items in group_by(interesting_rewards).items()}
+
+
+def _compute_spec_metrics(args, all_samples: List[Sample]):
+    if args.sglang_speculative_algorithm is None:
+        return {}
+    num_samples = len(all_samples)
+    metrics = {}
+    metrics["rollout/spec_accept_rate"] = (
+        sum(sample.spec_info.spec_accept_rate for sample in all_samples) / num_samples
+    )
+    metrics["rollout/spec_accept_length"] = (
+        sum(sample.spec_info.spec_accept_length for sample in all_samples) / num_samples
+    )
+    return metrics
 
 
 def _compute_reward_cat_metrics(args, all_samples: List[Sample]):
