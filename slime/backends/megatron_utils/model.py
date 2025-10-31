@@ -24,6 +24,7 @@ from megatron.training.training import get_model
 from slime.utils.memory_utils import clear_memory
 
 from .checkpoint import load_checkpoint, save_checkpoint
+from .cp_utils import slice_with_cp
 from .data import DataIterator, get_batch
 from .loss import loss_function
 from .model_provider import get_model_provider_func
@@ -404,6 +405,51 @@ def train_one_step(
             old_stage = os.environ["ROUTING_REPLAY_STAGE"]
             os.environ["ROUTING_REPLAY_STAGE"] = "replay_forward"
 
+        def build_loss_mask_for_mtp(batch: dict[str, object]) -> torch.Tensor | None:
+            tokens_tensor: torch.Tensor = batch["tokens"]
+
+            mask_chunks: list[torch.Tensor] = []
+            for total_len, response_len, resp_mask in zip(
+                batch["total_lengths"], batch["response_lengths"], batch["loss_masks"]
+            ):
+                assert (
+                    resp_mask.numel() == response_len
+                ), f"Unexpected loss mask size {resp_mask.numel()} (expected {response_len} or {total_len})."
+                prompt_len = total_len - response_len
+                full_mask = resp_mask.new_zeros(total_len)
+                full_mask[prompt_len:] = resp_mask
+
+                mask_chunks.append(slice_with_cp(full_mask, 0.0))
+
+            flattened_mask = torch.cat(mask_chunks, dim=0)
+            seq_len = tokens_tensor.size(-1)
+            assert (
+                flattened_mask.numel() <= seq_len
+            ), f"MTP loss mask ({flattened_mask.numel()}) exceeds token length ({seq_len})."
+
+            # token tensor may be padded by 128, so pad loss mask to the same length
+            loss_mask_tensor = flattened_mask.new_zeros(seq_len)
+            loss_mask_tensor[: flattened_mask.numel()] = flattened_mask
+            return loss_mask_tensor.unsqueeze(0)
+
+        loss_mask = None
+        mtp_kwargs = {}
+
+        # If enabling MTP training: trigger MTP loss inside Megatron while returning logits
+        # for the target model's loss.
+        if getattr(args, "enable_mtp_training", False):
+            loss_mask = build_loss_mask_for_mtp(batch)
+            if loss_mask is not None:
+                assert (
+                    loss_mask.shape == batch["tokens"].shape
+                ), f"loss_mask shape {loss_mask.shape} mismatches token shape {batch['tokens'].shape}"
+            mtp_kwargs = {
+                # We have to set labels to tokens for MTP training, to point out samples to train.
+                "mtp_labels": batch["tokens"],
+                # TODO: Detach hidden states on target model.
+                # "mtp_detach_hidden_states": True,
+            }
+
         if return_schedule_plan:
             assert (
                 args.overlap_moe_expert_parallel_comm
@@ -422,6 +468,8 @@ def train_one_step(
                 attention_mask=None,
                 labels=None,
                 packed_seq_params=batch["packed_seq_params"],
+                loss_mask=loss_mask,
+                mtp_kwargs=mtp_kwargs,
             )
 
         if os.environ.get("ENABLE_ROUTING_REPLAY", "0") == "1":

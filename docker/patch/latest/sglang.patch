@@ -1,5 +1,5 @@
 diff --git a/python/sglang/srt/entrypoints/http_server.py b/python/sglang/srt/entrypoints/http_server.py
-index 982e6467e..b363ab2ca 100644
+index 982e6467..b363ab2c 100644
 --- a/python/sglang/srt/entrypoints/http_server.py
 +++ b/python/sglang/srt/entrypoints/http_server.py
 @@ -398,6 +398,10 @@ async def validate_json_request(raw_request: Request):
@@ -14,7 +14,7 @@ index 982e6467e..b363ab2ca 100644
  async def health_generate(request: Request) -> Response:
      """
 diff --git a/python/sglang/srt/managers/scheduler.py b/python/sglang/srt/managers/scheduler.py
-index 78457abc8..b0868d24a 100644
+index 78457abc..b0868d24 100644
 --- a/python/sglang/srt/managers/scheduler.py
 +++ b/python/sglang/srt/managers/scheduler.py
 @@ -1729,7 +1729,7 @@ class Scheduler(
@@ -35,8 +35,24 @@ index 78457abc8..b0868d24a 100644
  
          if (
              self.enable_metrics
+diff --git a/python/sglang/srt/managers/scheduler_update_weights_mixin.py b/python/sglang/srt/managers/scheduler_update_weights_mixin.py
+index 7552bcce..0d88d694 100644
+--- a/python/sglang/srt/managers/scheduler_update_weights_mixin.py
++++ b/python/sglang/srt/managers/scheduler_update_weights_mixin.py
+@@ -69,7 +69,10 @@ class SchedulerUpdateWeightsMixin:
+ 
+     def update_weights_from_tensor(self, recv_req: UpdateWeightsFromTensorReqInput):
+         """Update the online model parameter from tensors."""
+-        success, message = self.tp_worker.update_weights_from_tensor(recv_req)
++        if self.server_args.speculative_enable_weights_update and self.draft_worker is not None:
++            success, message = self.draft_worker.update_weights_from_tensor(recv_req)
++        else:
++            success, message = self.tp_worker.update_weights_from_tensor(recv_req)
+         # TODO extract common code b/t update_weights_from_distributed and update_weights_from_tensor later
+         if success:
+             if recv_req.flush_cache:
 diff --git a/python/sglang/srt/managers/tokenizer_manager.py b/python/sglang/srt/managers/tokenizer_manager.py
-index 4b90411d5..61e6fefeb 100644
+index 4b90411d..2ed3171d 100644
 --- a/python/sglang/srt/managers/tokenizer_manager.py
 +++ b/python/sglang/srt/managers/tokenizer_manager.py
 @@ -1079,6 +1079,9 @@ class TokenizerManager(TokenizerCommunicatorMixin):
@@ -69,7 +85,17 @@ index 4b90411d5..61e6fefeb 100644
          state.output_token_logprobs_val.extend(
              recv_obj.output_token_logprobs_val[recv_obj_index]
          )
-@@ -1714,14 +1718,24 @@ class TokenizerManager(TokenizerCommunicatorMixin):
+@@ -1607,6 +1611,9 @@ class TokenizerManager(TokenizerCommunicatorMixin):
+                 meta_info["spec_accept_length"] = (
+                     recv_obj.completion_tokens[i] / recv_obj.spec_verify_ct[i]
+                 )
++                meta_info["spec_accept_token_num"] = accepted_tokens
++                meta_info["spec_draft_token_num"] = total_draft_tokens
++                meta_info["spec_verify_ct"] = recv_obj.spec_verify_ct[i]
+ 
+     def collect_metrics(self, state: ReqState, recv_obj: BatchStrOutput, i: int):
+         completion_tokens = (
+@@ -1714,14 +1721,24 @@ class TokenizerManager(TokenizerCommunicatorMixin):
          state.finished = True
          if recv_obj.finished_reason:
              out = {
@@ -94,7 +120,7 @@ index 4b90411d5..61e6fefeb 100644
                  "meta_info": {
                      "id": origin_rid,
                      "finish_reason": {
-@@ -1730,6 +1744,11 @@ class TokenizerManager(TokenizerCommunicatorMixin):
+@@ -1730,6 +1747,11 @@ class TokenizerManager(TokenizerCommunicatorMixin):
                      },
                      "prompt_tokens": 0,
                      "completion_tokens": 0,
@@ -107,7 +133,7 @@ index 4b90411d5..61e6fefeb 100644
              }
          state.out_list.append(out)
 diff --git a/python/sglang/srt/mem_cache/memory_pool.py b/python/sglang/srt/mem_cache/memory_pool.py
-index c468269f3..01a669659 100644
+index c468269f..01a66965 100644
 --- a/python/sglang/srt/mem_cache/memory_pool.py
 +++ b/python/sglang/srt/mem_cache/memory_pool.py
 @@ -807,6 +807,7 @@ class HybridLinearKVPool(KVCache):
@@ -128,7 +154,7 @@ index c468269f3..01a669659 100644
          self.full_attention_layer_id_mapping = {
              id: i for i, id in enumerate(full_attention_layer_ids)
 diff --git a/python/sglang/srt/model_executor/model_runner.py b/python/sglang/srt/model_executor/model_runner.py
-index 0c6407130..8f497b8a5 100644
+index 0c640713..8f497b8a 100644
 --- a/python/sglang/srt/model_executor/model_runner.py
 +++ b/python/sglang/srt/model_executor/model_runner.py
 @@ -23,6 +23,7 @@ import socket
@@ -156,8 +182,34 @@ index 0c6407130..8f497b8a5 100644
                  )
              else:
                  self.token_to_kv_pool = MHATokenToKVPool(
+diff --git a/python/sglang/srt/server_args.py b/python/sglang/srt/server_args.py
+index 6c9d7a8d..328f341e 100644
+--- a/python/sglang/srt/server_args.py
++++ b/python/sglang/srt/server_args.py
+@@ -337,6 +337,8 @@ class ServerArgs:
+     speculative_accept_threshold_acc: float = 1.0
+     speculative_token_map: Optional[str] = None
+     speculative_attention_mode: str = "prefill"
++    speculative_enable_weights_update: bool = False
++
+     # For ngram only
+     speculative_ngram_min_match_window_size: int = 1
+     speculative_ngram_max_match_window_size: int = 12
+@@ -2444,6 +2446,12 @@ class ServerArgs:
+             default=ServerArgs.speculative_ngram_capacity,
+             help="The cache capacity for ngram speculative decoding.",
+         )
++        parser.add_argument(
++            "--speculative-enable-weights-update",
++            action="store_true",
++            default=ServerArgs.speculative_enable_weights_update,
++            help="Enable weights update in speculative decoding. Currently only support update_weights_from_tensor.",
++        )
+ 
+         # Expert parallelism
+         parser.add_argument(
 diff --git a/python/sglang/srt/speculative/eagle_info.py b/python/sglang/srt/speculative/eagle_info.py
-index 2eebdb679..56066be41 100644
+index 2eebdb67..56066be4 100644
 --- a/python/sglang/srt/speculative/eagle_info.py
 +++ b/python/sglang/srt/speculative/eagle_info.py
 @@ -736,6 +736,10 @@ class EagleDraftInput(SpecInput, EagleDraftInputV2Mixin):
@@ -189,3 +241,57 @@ index 2eebdb679..56066be41 100644
  
  
  @dataclass
+diff --git a/python/sglang/srt/speculative/eagle_worker.py b/python/sglang/srt/speculative/eagle_worker.py
+index cb59b31f..bda03cc3 100644
+--- a/python/sglang/srt/speculative/eagle_worker.py
++++ b/python/sglang/srt/speculative/eagle_worker.py
+@@ -9,6 +9,7 @@ from sglang.srt.layers.logits_processor import LogitsProcessorOutput
+ from sglang.srt.layers.sampler import get_token_ids_logprobs, get_top_logprobs
+ from sglang.srt.managers.schedule_batch import ScheduleBatch
+ from sglang.srt.managers.scheduler import GenerationBatchResult
++from sglang.srt.managers.io_struct import UpdateWeightsFromTensorReqInput
+ from sglang.srt.managers.tp_worker import TpModelWorker
+ from sglang.srt.mem_cache.common import (
+     alloc_paged_token_slots_extend,
+@@ -20,6 +21,7 @@ from sglang.srt.model_executor.forward_batch_info import (
+     ForwardBatch,
+     ForwardMode,
+ )
++from sglang.srt.utils.patch_torch import monkey_patch_torch_reductions
+ from sglang.srt.server_args import ServerArgs
+ from sglang.srt.speculative.draft_utils import DraftBackendFactory
+ from sglang.srt.speculative.eagle_draft_cuda_graph_runner import (
+@@ -48,6 +50,7 @@ from sglang.srt.speculative.spec_utils import (
+     select_top_k_tokens,
+ )
+ from sglang.srt.utils import (
++    MultiprocessingSerializer,
+     empty_context,
+     get_available_gpu_memory,
+     get_bool_env_var,
+@@ -939,6 +942,25 @@ class EAGLEWorker(TpModelWorker):
+         draft_input.topk_p, draft_input.topk_index = fast_topk(probs, self.topk, dim=-1)
+         draft_input.hidden_states = logits_output.hidden_states
+ 
++    def update_weights_from_tensor(self, recv_req: UpdateWeightsFromTensorReqInput):
++
++        monkey_patch_torch_reductions()
++        named_tensors = MultiprocessingSerializer.deserialize(
++            recv_req.serialized_named_tensors[self.tp_rank]
++        )
++        success, message = self.model_runner.update_weights_from_tensor(
++            named_tensors=named_tensors,
++            load_format=recv_req.load_format,
++        )
++        if not success:
++            return success, message
++
++        success, message = self.target_worker.model_runner.update_weights_from_tensor(
++            named_tensors=named_tensors,
++            load_format=recv_req.load_format,
++        )
++
++        return success, message
+ 
+ @torch.compile(dynamic=True)
+ def get_last_loc_large_page_size_top_k_1(

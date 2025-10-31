@@ -1042,6 +1042,17 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
             )
             return parser
 
+        def add_mtp_training_arguments(parser):
+            """Add MTP training specific arguments."""
+            parser.add_argument(
+                "--enable-mtp-training",
+                action="store_true",
+                default=False,
+                help="Enable MTP layer parameter updates during training",
+            )
+            reset_arg(parser, "--mtp-loss-scaling-factor", type=float, default=0.2)
+            return parser
+
         def add_ci_arguments(parser):
             parser.add_argument(
                 "--ci-test",
@@ -1089,6 +1100,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
         parser = add_network_arguments(parser)
         parser = add_reward_model_arguments(parser)
         parser = add_rollout_buffer_arguments(parser)
+        parser = add_mtp_training_arguments(parser)
         parser = add_ci_arguments(parser)
         parser.set_defaults(sglang_tensor_parallel_size=add_sglang_tp_size())
 
