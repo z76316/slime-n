@@ -1,5 +1,4 @@
 from argparse import Namespace
-from collections.abc import Mapping
 from contextlib import nullcontext
 from itertools import accumulate
 
@@ -669,57 +668,12 @@ class FSDPTrainRayActor(TrainRayActor):
 
         Parameters:
             params_dict: Source mapping from parameter names to CPU tensors.
+
+        Note:
+            This method handles both regular Tensors and DTensors. For DTensors,
+            it properly distributes the full tensor according to FSDP sharding.
         """
-        self._load_cpu_state_dict(params_dict)
-        torch.cuda.synchronize()
-
-    def load_ref_model(self, ref_load_path: str | None) -> None:
-        """Load reference model weights once and cache them on CPU.
-
-        Parameters:
-            ref_load_path: Path to a directory containing a HF checkpoint. If
-                None, a ValueError is raised.
-        """
-        if ref_load_path is None:
-            raise ValueError("ref_load_path must be provided when loading reference model")
-
-        current_weights = {}
-        self.update_cpu_params_dict(current_weights)
-
-        try:
-            import os
-
-            if os.path.isdir(ref_load_path):
-                temp_ref_model = AutoModelForCausalLM.from_pretrained(
-                    ref_load_path,
-                    trust_remote_code=True,
-                    torch_dtype=torch.bfloat16,
-                    device_map="cpu",
-                )
-
-                ref_state_dict = temp_ref_model.state_dict()
-                self.weights["ref"] = {}
-
-                for name, tensor in ref_state_dict.items():
-                    actor_tensor = current_weights.get(name)
-                    target_dtype = actor_tensor.dtype if actor_tensor is not None else tensor.dtype
-                    cpu_tensor = tensor.detach().to(device="cpu", dtype=target_dtype, copy=True)
-                    self.weights["ref"][name] = cpu_tensor.pin_memory()
-
-                del temp_ref_model
-                torch.cuda.empty_cache()
-            else:
-                raise NotImplementedError(f"Loading from checkpoint file {ref_load_path} not yet implemented")
-
-            print("Reference model parameters loaded and stored in CPU memory")
-
-        finally:
-            self.update_gpu_params_dict(current_weights)
-
-    @torch.no_grad()
-    def _load_cpu_state_dict(self, full_state_dict: Mapping[str, torch.Tensor]) -> None:
-        """Load a CPU full-state dict into the model, handling DTensor shards."""
-
+        # Cache parameter and buffer maps for efficiency
         if not hasattr(self, "_fsdp_param_map"):
             self._fsdp_param_map = dict(self.model.named_parameters())
             self._fsdp_buffer_map = dict(self.model.named_buffers())
@@ -727,7 +681,7 @@ class FSDPTrainRayActor(TrainRayActor):
         param_map = self._fsdp_param_map
         buffer_map = self._fsdp_buffer_map
 
-        for name, src in full_state_dict.items():
+        for name, src in params_dict.items():
             if not torch.is_tensor(src):
                 continue
 
@@ -753,7 +707,49 @@ class FSDPTrainRayActor(TrainRayActor):
                 )
                 dst_tensor.copy_(distributed)
             else:
+                # Regular tensor: just move to GPU
                 dst_tensor.copy_(src_tensor.to(device=dst_tensor.device, non_blocking=True))
+
+        torch.cuda.synchronize()
+
+    def load_ref_model(self, ref_load_path: str | None) -> None:
+        """Load reference model weights once and cache them on CPU.
+
+        Parameters:
+            ref_load_path: Path to a directory containing a HF checkpoint. If
+                None, a ValueError is raised.
+        """
+        if ref_load_path is None:
+            raise ValueError("ref_load_path must be provided when loading reference model")
+
+        import os
+
+        if os.path.isdir(ref_load_path):
+            # Get actor weights for dtype matching
+            actor_weights = {}
+            self.update_cpu_params_dict(actor_weights)
+
+            temp_ref_model = AutoModelForCausalLM.from_pretrained(
+                ref_load_path,
+                trust_remote_code=True,
+                torch_dtype=torch.bfloat16,
+                device_map="cpu",
+            )
+            ref_state_dict = temp_ref_model.state_dict()
+            self.weights["ref"] = {}
+
+            for name, tensor in ref_state_dict.items():
+                actor_tensor = actor_weights.get(name)
+                target_dtype = actor_tensor.dtype if actor_tensor is not None else tensor.dtype
+                cpu_tensor = tensor.detach().to(device="cpu", dtype=target_dtype, copy=True)
+                self.weights["ref"][name] = cpu_tensor.pin_memory()
+
+            del temp_ref_model
+            torch.cuda.empty_cache()
+        else:
+            raise NotImplementedError(f"Loading from checkpoint file {ref_load_path} not yet implemented")
+
+        print("Reference model parameters loaded and stored in CPU memory")
 
 
 def selective_log_softmax_raw(logits: torch.Tensor, input_ids: torch.Tensor) -> torch.Tensor:
