@@ -210,6 +210,7 @@ def process_rollout_data(args, rollout_data_ref, dp_rank, dp_size):
         "round_number",
         "sample_indices",
         "rollout_log_probs",
+        "rollout_routed_experts",
         "prompt",
         "teacher_log_probs",
     ]:
