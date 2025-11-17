@@ -295,11 +295,12 @@ async def abort(args: Namespace, rollout_id: int) -> list[list[Sample]]:
     state = GenerateState(args)
     assert not state.aborted
     state.aborted = True
-    response = await get(f"http://{args.sglang_router_ip}:{args.sglang_router_port}/list_workers")
+    response = await get(f"http://{args.sglang_router_ip}:{args.sglang_router_port}/workers")
 
     # abort all the requests
-    for url in response["urls"]:
-        logger.info(f"Abort request for {url}")
+    for worker in response["workers"]:
+        url = worker["url"]
+        print(f"Abort request for {url}", flush=True)
         await post(f"{url}/abort_request", {"abort_all": True})
 
     # make sure all the pending tasks are finished
