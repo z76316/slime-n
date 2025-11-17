@@ -132,8 +132,9 @@ class SGLangEngine(RayActor):
         logger.info(f"Launch HttpServerEngineAdapter at: {self.server_host}:{self.server_port}")
         self.process = launch_server_process(ServerArgs(**server_args_dict))
         if self.node_rank == 0 and self.router_ip and self.router_port:
-            response = requests.post(
-                f"http://{self.router_ip}:{self.router_port}/add_worker?url=http://{self.server_host}:{self.server_port}"
+            requests.post(
+                f"http://{self.router_ip}:{self.router_port}/workers",
+                json={"url": f"http://{self.server_host}:{self.server_port}"},
             )
             response.raise_for_status()
 
@@ -227,8 +228,9 @@ class SGLangEngine(RayActor):
 
         logger.info(f"Shutdown engine {self.server_host}:{self.server_port}...")
         if self.node_rank == 0:
-            response = requests.post(
-                f"http://{self.router_ip}:{self.router_port}/remove_worker?url=http://{self.server_host}:{self.server_port}"
+            worker_url = f"http://{self.server_host}:{self.server_port}"
+            requests.delete(
+                f"http://{self.router_ip}:{self.router_port}/workers/{worker_url}"
             )
             response.raise_for_status()
         kill_process_tree(self.process.pid)
