@@ -446,7 +446,12 @@ class FSDPTrainRayActor(TrainRayActor):
 
         self.compute_log_prob("actor", packed_batches)
 
-        for metric_key in ["log_probs", "ref_log_probs", "advantages", "returns", "raw_reward"]:
+        if "raw_reward" in rollout_data and dist.get_rank() == 0:
+            raw_reward_list = rollout_data["raw_reward"]
+            if raw_reward_list:
+                log_dict["rollout/raw_reward"] = sum(raw_reward_list) / len(raw_reward_list)
+
+        for metric_key in ["log_probs", "ref_log_probs", "advantages", "returns"]:
             if metric_key not in packed_batches[0]:
                 continue
             val = torch.tensor([0.0], device=torch.cuda.current_device())
