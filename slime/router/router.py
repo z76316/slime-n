@@ -155,10 +155,6 @@ class SlimeRouter:
             "rollout_logp": logp,
         }
 
-        # # Add logp to response if requested
-        # if sum(logp) > 0:
-        #     result["rollout_logp"] = logp
-
         return result
 
     def _use_url(self):
@@ -178,10 +174,6 @@ class SlimeRouter:
 
 
 if __name__ == "__main__":
-    import argparse
-
-    import uvicorn
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=30000)
