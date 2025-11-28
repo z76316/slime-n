@@ -306,7 +306,12 @@ def init_rollout_engines(args, pg, all_rollout_engines):
         }
 
         # TODO: currently the amem position is hardcoded, change to a better way later.
-        if len(glob("/usr/local/lib/python3.12/dist-packages/nvidia/nccl/lib/libamem_nccl.so*")) > 0:
+        # note that amem does not work with update weights from distributed.
+        if (
+            args.offload_rollout
+            and args.actor_num_nodes * args.actor_num_gpus_per_node >= args.rollout_num_gpus
+            and len(glob("/usr/local/lib/python3.12/dist-packages/nvidia/nccl/lib/libamem_nccl.so*")) > 0
+        ):
             logger.info("Enable AMEM for rollout engine.")
             ld_library_path = (
                 os.environ.get("LD_LIBRARY_PATH", "") + ":/usr/local/lib/python3.12/dist-packages/nvidia/nccl/lib"
