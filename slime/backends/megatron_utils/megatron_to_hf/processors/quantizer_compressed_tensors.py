@@ -2,9 +2,13 @@ import logging
 import math
 import re
 
-import fake_int4_quant_cuda
 import torch
 import torch.nn as nn
+
+try:
+    import fake_int4_quant_cuda
+except ImportError:
+    fake_int4_quant_cuda = None
 
 logger = logging.getLogger(__name__)
 
