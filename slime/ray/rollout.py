@@ -388,7 +388,7 @@ class RolloutManager:
         if samples[0].multimodal_train_inputs is not None:
             train_data["multimodal_train_inputs"] = [sample.multimodal_train_inputs for sample in samples]
 
-        if "teacher_log_probs" in samples[0].__dict__:
+        if samples[0].teacher_log_probs is not None:
             train_data["teacher_log_probs"] = [sample.teacher_log_probs for sample in samples]
 
         return train_data
