@@ -980,7 +980,7 @@ class TestSglangProjectionTypes:
         cfgs = parse_policy_configs(EXAMPLE_CONFIG)
         sg = build_sglang_config_from_policies(cfgs)
         for m in sg.models:
-            assert m.model_path == "Qwen/Qwen3-0.6B"
+            assert m.model_path == "/root/Qwen3-0.6B"
 
     def test_num_gpus_per_engine_passed_through(self):
         cfgs = parse_policy_configs(EXAMPLE_CONFIG)
@@ -1182,11 +1182,11 @@ class TestWeightLoadFallback:
         return Namespace(**defaults)
 
     def test_bridge_with_load_none_falls_back_to_hf_checkpoint(self):
-        """The user's case: load is unset in config.yaml, megatron_to_hf_mode=bridge.
-        config_to_namespace must populate ns.load with hf_checkpoint so the
-        actor's `assert args.load is not None` passes."""
+        """Mirrors upstream slime_validate_args: bridge mode + load None +
+        ref_load None → ns.load = cfg.hf_checkpoint. mbridge then resolves
+        the hub id at AutoBridge.from_hf_pretrained time."""
         from slime.utils.policy_config import config_to_namespace
-        cfg = _minimal_actor(megatron_to_hf_mode="bridge", load=None,
+        cfg = _minimal_actor(megatron_to_hf_mode="bridge", load=None, ref_load=None,
                              hf_checkpoint="Qwen/Qwen3-0.6B")
         ns = config_to_namespace(cfg, self._ns())
         assert ns.load == "Qwen/Qwen3-0.6B"
@@ -1204,7 +1204,7 @@ class TestWeightLoadFallback:
         assert ns.load == str(ckpt)
 
     def test_bridge_uses_ref_load_when_set(self):
-        """Documented order: ref_load wins over hf_checkpoint when load is None."""
+        """Bridge mode + load None + ref_load set → ns.load = ref_load."""
         from slime.utils.policy_config import config_to_namespace
         cfg = _minimal_actor(megatron_to_hf_mode="bridge", load=None, ref_load="/path/ref")
         ns = config_to_namespace(cfg, self._ns())
