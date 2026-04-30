@@ -354,9 +354,16 @@ class SGLangEngine(RayActor):
         response.raise_for_status()
         return response.json()["weight_version"]
 
-    def release_memory_occupation(self):
+    def release_memory_occupation(self, tags: list[str] | None = None):
+        """Release sglang's GPU memory pools so a colocated trainer can use the GPU.
+
+        tags: subset of {weights, kv_cache, cuda_graph}. Default None → release
+        everything (matches sglang's API). Pass an explicit list to free only
+        a subset (e.g. [kv_cache] for partial releases).
+        """
         self.flush_cache()
-        return self._make_request("release_memory_occupation")
+        payload = {"tags": tags} if tags is not None else None
+        return self._make_request("release_memory_occupation", payload)
 
     def resume_memory_occupation(self, tags: list[str] = None):
         """
@@ -516,6 +523,13 @@ def _compute_server_args(
     node_rank = rank % nnodes
     base = base_gpu_id if base_gpu_id is not None else get_base_gpu_id(args, rank)
     base = _to_local_gpu_id(base)
+    # Diagnostic: print colocate-related flags so we can verify --colocate
+    # is reaching sglang (rather than guessing from indirect symptoms).
+    logger.info(
+        f"[sglang init rank={rank}] colocate={getattr(args, 'colocate', None)} "
+        f"offload_rollout={getattr(args, 'offload_rollout', None)} "
+        f"→ enable_memory_saver={args.offload_rollout}"
+    )
     kwargs = {
         "model_path": args.hf_checkpoint,
         "trust_remote_code": True,
