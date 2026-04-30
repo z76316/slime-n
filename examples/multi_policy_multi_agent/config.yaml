@@ -31,7 +31,7 @@ policies:
     role: actor
 
     hf_checkpoint: Qwen/Qwen3-0.6B
-    load: /ckpt/multi_policy_multi_agent/qwen3-0.6b/solver
+    # load: /ckpt/multi_policy_multi_agent/qwen3-0.6b/solver
     save: /ckpt/multi_policy_multi_agent/qwen3-0.6b/solver
     # ref_load: /ckpt/qwen3-0.6b/ref   # uncomment for KL ref
 
@@ -42,12 +42,13 @@ policies:
     sglang_num_nodes: 1
 
     megatron:
+      megatron_to_hf_mode: bridge
       tensor_model_parallel_size: 1
       pipeline_model_parallel_size: 1
       context_parallel_size: 1
       expert_model_parallel_size: 1
       expert_tensor_parallel_size: 1
-      sequence_parallel: true
+
 
       recompute_granularity: full
       recompute_method: uniform
@@ -103,7 +104,7 @@ policies:
     role: actor
 
     hf_checkpoint: Qwen/Qwen3-0.6B
-    load: /ckpt/multi_policy_multi_agent/qwen3-0.6b/rewriter
+    # load: /ckpt/multi_policy_multi_agent/qwen3-0.6b/rewriter
     save: /ckpt/multi_policy_multi_agent/qwen3-0.6b/rewriter
 
     buffer_mode: split
@@ -113,12 +114,12 @@ policies:
     sglang_num_nodes: 1
 
     megatron:
+      megatron_to_hf_mode: bridge
       tensor_model_parallel_size: 1
       pipeline_model_parallel_size: 1
       context_parallel_size: 1
       expert_model_parallel_size: 1
       expert_tensor_parallel_size: 1
-      sequence_parallel: true
 
       recompute_granularity: full
       recompute_method: uniform
@@ -165,7 +166,7 @@ policies:
     role: actor
 
     hf_checkpoint: Qwen/Qwen3-0.6B
-    load: /ckpt/multi_policy_multi_agent/qwen3-0.6b/selector
+    # load: /ckpt/multi_policy_multi_agent/qwen3-0.6b/selector
     save: /ckpt/multi_policy_multi_agent/qwen3-0.6b/selector
 
     buffer_mode: split
@@ -175,12 +176,12 @@ policies:
     sglang_num_nodes: 1
 
     megatron:
+      megatron_to_hf_mode: bridge
       tensor_model_parallel_size: 1
       pipeline_model_parallel_size: 1
       context_parallel_size: 1
       expert_model_parallel_size: 1
       expert_tensor_parallel_size: 1
-      sequence_parallel: true
 
       recompute_granularity: full
       recompute_method: uniform
