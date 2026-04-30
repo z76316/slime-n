@@ -55,7 +55,7 @@ policies:
       recompute_num_layers: 1
 
       micro_batch_size: 1
-      global_batch_size: 256
+      global_batch_size: 32
       use_dynamic_batch_size: true
       max_tokens_per_gpu: 20480
 
@@ -70,7 +70,7 @@ policies:
       use_precision_aware_optimizer: true
 
       advantage_estimator: grpo
-      n_samples_per_prompt: 8
+      n_samples_per_prompt: 4
       eps_clip: 0.2
       eps_clip_high: 0.28
       kl_coef: 0
@@ -85,7 +85,7 @@ policies:
       mem_fraction_static: 0.5  # L40S has 46 GB; leave room for the colocated Megatron actor
       cuda_graph_bs: [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 96, 128, 192, 256]
       chunked_prefill_size: 8192
-      max_running_requests: 256
+      max_running_requests: 32
       log_level: info
       # Optional (uncomment to enable):
       # max_total_tokens: 1048576
@@ -126,7 +126,7 @@ policies:
       recompute_num_layers: 1
 
       micro_batch_size: 1
-      global_batch_size: 256
+      global_batch_size: 32
       use_dynamic_batch_size: true
       max_tokens_per_gpu: 20480
 
@@ -141,7 +141,7 @@ policies:
       use_precision_aware_optimizer: true
 
       advantage_estimator: grpo
-      n_samples_per_prompt: 8
+      n_samples_per_prompt: 4
       eps_clip: 0.2
       kl_coef: 0
       use_kl_loss: false
@@ -154,7 +154,7 @@ policies:
       mem_fraction_static: 0.5  # L40S has 46 GB; leave room for the colocated Megatron actor
       cuda_graph_bs: [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 96, 128, 192, 256]
       chunked_prefill_size: 8192
-      max_running_requests: 256
+      max_running_requests: 32
       log_level: info
 
       server_groups:
@@ -188,7 +188,7 @@ policies:
       recompute_num_layers: 1
 
       micro_batch_size: 1
-      global_batch_size: 256
+      global_batch_size: 32
       use_dynamic_batch_size: true
       max_tokens_per_gpu: 20480
 
@@ -203,7 +203,7 @@ policies:
       use_precision_aware_optimizer: true
 
       advantage_estimator: grpo
-      n_samples_per_prompt: 8     # N parallel selectors per problem (matches num_parallel)
+      n_samples_per_prompt: 4     # N parallel selectors per problem (matches num_parallel)
       eps_clip: 0.2
       kl_coef: 0
       use_kl_loss: false
@@ -216,7 +216,7 @@ policies:
       mem_fraction_static: 0.5  # L40S has 46 GB; leave room for the colocated Megatron actor
       cuda_graph_bs: [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 96, 128, 192, 256]
       chunked_prefill_size: 8192
-      max_running_requests: 256
+      max_running_requests: 32
       log_level: info
 
       server_groups:
