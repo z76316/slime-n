@@ -451,9 +451,7 @@ def train_one_step(
         # so we'd be dumping junk dicts there. Once-per-rollout flush happens
         # in MegatronTrainRayActor.train after this train_one_step returns.
         if mpu.get_pipeline_model_parallel_rank() == 0:
-            train_dump_utils.stash_packed_batch(
-                args, batch, step_id=step_id, microbatch_idx=_packed_mb_counter[0]
-            )
+            train_dump_utils.stash_packed_batch(args, batch, step_id=step_id, microbatch_idx=_packed_mb_counter[0])
             _packed_mb_counter[0] += 1
 
         if os.environ.get("ENABLE_ROUTING_REPLAY", "0") == "1":

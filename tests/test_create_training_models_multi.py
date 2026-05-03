@@ -193,9 +193,7 @@ class TestBasicConstruction:
         rm = _make_rollout_manager()
 
         with _patch_allocate([[0]]):
-            handles = create_training_models_multi(
-                _base_args(kl_coef=0.5, use_kl_loss=True), pgs, rm, cfgs
-            )
+            handles = create_training_models_multi(_base_args(kl_coef=0.5, use_kl_loss=True), pgs, rm, cfgs)
 
         assert handles["solver"].args.kl_coef == 0.5
         assert handles["solver"].args.use_kl_loss is True
@@ -226,7 +224,7 @@ class TestRegistration:
         assert names == ["solver", "rewriter"]
         assert servers == ["solver", "rewriter"]
         # args is the per-policy Namespace, not the global one
-        for call_args, name in zip(calls, ["solver", "rewriter"]):
+        for call_args, name in zip(calls, ["solver", "rewriter"], strict=True):
             assert call_args.args[2].policy_name == name
 
     def test_register_uses_per_policy_namespace_not_global(self):
@@ -289,9 +287,7 @@ class TestAsyncInit:
         rm = _make_rollout_manager()
 
         with _patch_allocate([[0]]):
-            handles = create_training_models_multi(
-                _base_args(kl_coef=0.0, use_kl_loss=False), pgs, rm, cfgs
-            )
+            handles = create_training_models_multi(_base_args(kl_coef=0.0, use_kl_loss=False), pgs, rm, cfgs)
 
         kwargs = handles["solver"].train_group.async_init.call_args.kwargs
         assert kwargs["with_ref"] is False
@@ -305,9 +301,7 @@ class TestAsyncInit:
         rm = _make_rollout_manager()
 
         with _patch_allocate([[0]]):
-            handles = create_training_models_multi(
-                _base_args(use_opd=True, opd_type="megatron"), pgs, rm, cfgs
-            )
+            handles = create_training_models_multi(_base_args(use_opd=True, opd_type="megatron"), pgs, rm, cfgs)
 
         kwargs = handles["solver"].train_group.async_init.call_args.kwargs
         assert kwargs["with_opd_teacher"] is True
@@ -321,9 +315,7 @@ class TestAsyncInit:
         rm = _make_rollout_manager()
 
         with _patch_allocate([[0]]):
-            handles = create_training_models_multi(
-                _base_args(use_opd=True, opd_type="sglang"), pgs, rm, cfgs
-            )
+            handles = create_training_models_multi(_base_args(use_opd=True, opd_type="sglang"), pgs, rm, cfgs)
 
         kwargs = handles["solver"].train_group.async_init.call_args.kwargs
         assert kwargs["with_opd_teacher"] is False
@@ -515,9 +507,7 @@ class TestAllocateTrainGroup:
             recorded_pgs.append((args.policy_name, pg))
             return _make_train_group([0])
 
-        with patch(
-            "slime.ray.placement_group.allocate_train_group", side_effect=_record_allocate
-        ):
+        with patch("slime.ray.placement_group.allocate_train_group", side_effect=_record_allocate):
             create_training_models_multi(_base_args(), pgs, rm, cfgs)
 
         recorded = dict(recorded_pgs)
@@ -562,18 +552,12 @@ class TestOrdering:
         rm = _make_rollout_manager()
         events: list[str] = []
 
-        rm.register_policy.remote = MagicMock(
-            side_effect=lambda *a, **kw: events.append("register") or None
-        )
+        rm.register_policy.remote = MagicMock(side_effect=lambda *a, **kw: events.append("register") or None)
 
         def _allocate(args, num_nodes, num_gpus_per_node, pg, role="actor"):
             tg = MagicMock(name="train_group")
-            tg.async_init = MagicMock(
-                side_effect=lambda *a, **kw: events.append("async_init") or [0]
-            )
-            tg.set_rollout_manager = MagicMock(
-                side_effect=lambda *a, **kw: events.append("set_rm")
-            )
+            tg.async_init = MagicMock(side_effect=lambda *a, **kw: events.append("async_init") or [0])
+            tg.set_rollout_manager = MagicMock(side_effect=lambda *a, **kw: events.append("set_rm"))
             return tg
 
         with patch("slime.ray.placement_group.allocate_train_group", side_effect=_allocate):
@@ -596,16 +580,12 @@ class TestOrdering:
 
         def _allocate(args, num_nodes, num_gpus_per_node, pg, role="actor"):
             tg = MagicMock(name="train_group")
-            tg.async_init = MagicMock(
-                side_effect=lambda *a, **kw: events.append("async_init") or [0]
-            )
+            tg.async_init = MagicMock(side_effect=lambda *a, **kw: events.append("async_init") or [0])
             tg.set_rollout_manager = MagicMock()
             return tg
 
         with patch("slime.ray.placement_group.allocate_train_group", side_effect=_allocate):
-            create_training_models_multi(
-                _base_args(rollout_global_dataset=True), pgs, rm, cfgs
-            )
+            create_training_models_multi(_base_args(rollout_global_dataset=True), pgs, rm, cfgs)
 
         assert events == ["async_init", "async_init", "load"]
 

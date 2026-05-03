@@ -41,6 +41,7 @@ if importlib.util.find_spec("ray") is None:
 def _make_manager():
     """Construct a RolloutManager skipping the heavy Ray actor __init__."""
     from slime.ray.rollout import RolloutManager
+
     cls = RolloutManager.__ray_actor_class__ if hasattr(RolloutManager, "__ray_actor_class__") else RolloutManager
     mgr = cls.__new__(cls)
     mgr.servers = {}
@@ -77,6 +78,7 @@ def _make_sample(policy_name=None, reward=1.0):
     actually read. We avoid the real Sample dataclass here because it has many
     required fields we don't care about for routing tests."""
     from slime.utils.types import Sample
+
     s = Sample(prompt="p", index=0)
     s.policy_name = policy_name
     s.reward = reward
@@ -101,10 +103,9 @@ class TestSplitByPolicy:
 
     def test_all_tagged_routes_by_name(self):
         mgr = _make_manager()
-        samples = (
-            [_make_sample(policy_name="solver") for _ in range(4)]
-            + [_make_sample(policy_name="rewriter") for _ in range(4)]
-        )
+        samples = [_make_sample(policy_name="solver") for _ in range(4)] + [
+            _make_sample(policy_name="rewriter") for _ in range(4)
+        ]
         out = mgr._split_by_policy(samples)
         assert set(out.keys()) == {"solver", "rewriter"}
         assert len(out["solver"]) == 4
@@ -126,10 +127,9 @@ class TestSplitByPolicy:
     def test_mixed_tagged_and_untagged(self):
         """Untagged samples land in __shared__ bucket; tagged go to their named bucket."""
         mgr = _make_manager()
-        samples = (
-            [_make_sample(policy_name="solver") for _ in range(4)]
-            + [_make_sample(policy_name=None) for _ in range(4)]
-        )
+        samples = [_make_sample(policy_name="solver") for _ in range(4)] + [
+            _make_sample(policy_name=None) for _ in range(4)
+        ]
         out = mgr._split_by_policy(samples)
         assert set(out.keys()) == {"solver", "__shared__"}
         assert len(out["solver"]) == 4
@@ -303,8 +303,6 @@ class TestConvertSamplesToTrainDataPropagation:
         mgr = _make_manager()
         captured = {}
 
-        original = mgr._post_process_rewards
-
         def spy(samples, policy_args=None):
             captured["policy_args"] = policy_args
             return ([], [])
@@ -337,7 +335,11 @@ def _stub_pipeline(mgr):
         patch.object(mgr, "_save_debug_rollout_data", return_value=None),
         patch("slime.ray.rollout._log_rollout_data", return_value=None),
         patch.object(mgr, "_split_train_data_by_dp", side_effect=lambda data, dp: [("batch", dp)]),
-        patch.object(mgr, "_convert_samples_to_train_data", side_effect=lambda samples, policy_args=None: {"samples": samples, "policy_args": policy_args}),
+        patch.object(
+            mgr,
+            "_convert_samples_to_train_data",
+            side_effect=lambda samples, policy_args=None: {"samples": samples, "policy_args": policy_args},
+        ),
     ]
 
 
@@ -383,16 +385,19 @@ class TestGenerateDispatchMultiPolicy:
 
     def test_returns_dict_when_samples_tagged(self):
         mgr = self._mgr_with_two_policies()
-        samples = (
-            [_make_sample(policy_name="solver") for _ in range(4)]
-            + [_make_sample(policy_name="rewriter") for _ in range(4)]
-        )
+        samples = [_make_sample(policy_name="solver") for _ in range(4)] + [
+            _make_sample(policy_name="rewriter") for _ in range(4)
+        ]
 
-        with patch.object(mgr, "_get_rollout_data", return_value=(samples, {})), \
-             patch.object(mgr, "_save_debug_rollout_data"), \
-             patch("slime.ray.rollout._log_rollout_data"), \
-             patch.object(mgr, "_convert_samples_to_train_data", side_effect=lambda s, policy_args=None: {"samples": s, "policy_args": policy_args}), \
-             patch.object(mgr, "_split_train_data_by_dp", side_effect=lambda data, dp: [(data, dp)]):
+        with patch.object(mgr, "_get_rollout_data", return_value=(samples, {})), patch.object(
+            mgr, "_save_debug_rollout_data"
+        ), patch("slime.ray.rollout._log_rollout_data"), patch.object(
+            mgr,
+            "_convert_samples_to_train_data",
+            side_effect=lambda s, policy_args=None: {"samples": s, "policy_args": policy_args},
+        ), patch.object(
+            mgr, "_split_train_data_by_dp", side_effect=lambda data, dp: [(data, dp)]
+        ):
             result = mgr.generate(rollout_id=0)
 
         assert isinstance(result, dict)
@@ -404,21 +409,22 @@ class TestGenerateDispatchMultiPolicy:
     def test_passes_per_policy_args_to_convert(self):
         """Each bucket's _convert_samples_to_train_data call gets that policy's args."""
         mgr = self._mgr_with_two_policies()
-        samples = (
-            [_make_sample(policy_name="solver") for _ in range(4)]
-            + [_make_sample(policy_name="rewriter") for _ in range(2)]
-        )
+        samples = [_make_sample(policy_name="solver") for _ in range(4)] + [
+            _make_sample(policy_name="rewriter") for _ in range(2)
+        ]
         captured = []
 
         def fake_convert(s, policy_args=None):
             captured.append(policy_args)
             return {"k": s}
 
-        with patch.object(mgr, "_get_rollout_data", return_value=(samples, {})), \
-             patch.object(mgr, "_save_debug_rollout_data"), \
-             patch("slime.ray.rollout._log_rollout_data"), \
-             patch.object(mgr, "_convert_samples_to_train_data", side_effect=fake_convert), \
-             patch.object(mgr, "_split_train_data_by_dp", side_effect=lambda data, dp: [data]):
+        with patch.object(mgr, "_get_rollout_data", return_value=(samples, {})), patch.object(
+            mgr, "_save_debug_rollout_data"
+        ), patch("slime.ray.rollout._log_rollout_data"), patch.object(
+            mgr, "_convert_samples_to_train_data", side_effect=fake_convert
+        ), patch.object(
+            mgr, "_split_train_data_by_dp", side_effect=lambda data, dp: [data]
+        ):
             mgr.generate(rollout_id=0)
 
         assert len(captured) == 2
@@ -433,9 +439,9 @@ class TestGenerateDispatchMultiPolicy:
         mgr = self._mgr_with_two_policies()
         samples = [_make_sample(policy_name=None) for _ in range(4)]
 
-        with patch.object(mgr, "_get_rollout_data", return_value=(samples, {})), \
-             patch.object(mgr, "_save_debug_rollout_data"), \
-             patch("slime.ray.rollout._log_rollout_data"):
+        with patch.object(mgr, "_get_rollout_data", return_value=(samples, {})), patch.object(
+            mgr, "_save_debug_rollout_data"
+        ), patch("slime.ray.rollout._log_rollout_data"):
             with pytest.raises(ValueError, match="Multi-policy mode active"):
                 mgr.generate(rollout_id=0)
 
@@ -444,11 +450,13 @@ class TestGenerateDispatchMultiPolicy:
         mgr = self._mgr_with_two_policies()
         samples = [_make_sample(policy_name="ghost") for _ in range(2)]
 
-        with patch.object(mgr, "_get_rollout_data", return_value=(samples, {})), \
-             patch.object(mgr, "_save_debug_rollout_data"), \
-             patch("slime.ray.rollout._log_rollout_data"), \
-             patch.object(mgr, "_convert_samples_to_train_data", return_value={}), \
-             patch.object(mgr, "_split_train_data_by_dp", return_value=[]):
+        with patch.object(mgr, "_get_rollout_data", return_value=(samples, {})), patch.object(
+            mgr, "_save_debug_rollout_data"
+        ), patch("slime.ray.rollout._log_rollout_data"), patch.object(
+            mgr, "_convert_samples_to_train_data", return_value={}
+        ), patch.object(
+            mgr, "_split_train_data_by_dp", return_value=[]
+        ):
             with pytest.raises(ValueError, match="not a registered policy"):
                 mgr.generate(rollout_id=0)
 
@@ -456,17 +464,19 @@ class TestGenerateDispatchMultiPolicy:
         """v1 doesn't support broadcasting __shared__ samples to all policies;
         warn loudly and drop them. Tagged samples still route correctly."""
         import logging as _logging
-        mgr = self._mgr_with_two_policies()
-        samples = (
-            [_make_sample(policy_name="solver") for _ in range(4)]
-            + [_make_sample(policy_name=None) for _ in range(2)]
-        )
 
-        with patch.object(mgr, "_get_rollout_data", return_value=(samples, {})), \
-             patch.object(mgr, "_save_debug_rollout_data"), \
-             patch("slime.ray.rollout._log_rollout_data"), \
-             patch.object(mgr, "_convert_samples_to_train_data", side_effect=lambda s, policy_args=None: {"samples": s}), \
-             patch.object(mgr, "_split_train_data_by_dp", side_effect=lambda data, dp: [data]):
+        mgr = self._mgr_with_two_policies()
+        samples = [_make_sample(policy_name="solver") for _ in range(4)] + [
+            _make_sample(policy_name=None) for _ in range(2)
+        ]
+
+        with patch.object(mgr, "_get_rollout_data", return_value=(samples, {})), patch.object(
+            mgr, "_save_debug_rollout_data"
+        ), patch("slime.ray.rollout._log_rollout_data"), patch.object(
+            mgr, "_convert_samples_to_train_data", side_effect=lambda s, policy_args=None: {"samples": s}
+        ), patch.object(
+            mgr, "_split_train_data_by_dp", side_effect=lambda data, dp: [data]
+        ):
             with caplog.at_level(_logging.WARNING, logger="slime.ray.rollout"):
                 result = mgr.generate(rollout_id=0)
 

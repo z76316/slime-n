@@ -28,12 +28,8 @@ if _REPO_ROOT not in sys.path:
 if importlib.util.find_spec("ray") is None:
     pytest.skip("ray not installed; skipping placement_group tests", allow_module_level=True)
 
-from slime.ray.placement_group import (
-    create_placement_groups_multi,
-    create_rollout_manager_multi,
-)
+from slime.ray.placement_group import create_placement_groups_multi, create_rollout_manager_multi
 from slime.utils.policy_config import PolicyConfig
-
 
 # ────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -53,15 +49,14 @@ def _policy(name, megatron_num_nodes=1, sglang_num_nodes=1, num_gpus_per_node=8)
         sglang={
             "update_weights": True,
             "num_gpus_per_engine": num_gpus_per_node,
-            "server_groups": [
-                {"worker_type": "regular", "num_gpus": sglang_num_nodes * num_gpus_per_node}
-            ],
+            "server_groups": [{"worker_type": "regular", "num_gpus": sglang_num_nodes * num_gpus_per_node}],
         },
     )
 
 
 class _MockPG:
     """Stand-in for ray's PlacementGroup — only its identity matters in tests."""
+
     def __init__(self, total):
         self.total = total
 
@@ -235,17 +230,21 @@ class TestLegacyCreatePlacementGroupsUnchanged:
 
     def test_original_function_still_exists(self):
         from slime.ray.placement_group import create_placement_groups
+
         assert callable(create_placement_groups)
 
     def test_original_function_signature(self):
         import inspect
+
         from slime.ray.placement_group import create_placement_groups
+
         sig = inspect.signature(create_placement_groups)
         assert list(sig.parameters.keys()) == ["args"]
 
     def test_original_dispatches_on_use_critic(self):
         """train.py expects the result to have keys: actor, rollout, critic."""
         from slime.ray.placement_group import create_placement_groups
+
         args = Namespace(
             debug_train_only=False,
             debug_rollout_only=False,

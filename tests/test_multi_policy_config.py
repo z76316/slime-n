@@ -38,9 +38,7 @@ from slime.utils.policy_config import (
 )
 
 
-EXAMPLE_CONFIG = os.path.join(
-    _REPO_ROOT, "examples", "multi_policy_multi_agent", "config.yaml"
-)
+EXAMPLE_CONFIG = os.path.join(_REPO_ROOT, "examples", "multi_policy_multi_agent", "config.yaml")
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -209,32 +207,28 @@ class TestCrossPolicyValidators:
 
     def test_shared_buffer_estimator_must_match(self):
         cfgs = [
-            _minimal_actor(name="a", sglang_server="a",
-                           buffer_mode="shared", advantage_estimator="grpo"),
-            _minimal_actor(name="b", sglang_server="b",
-                           buffer_mode="shared", advantage_estimator="gspo"),
+            _minimal_actor(name="a", sglang_server="a", buffer_mode="shared", advantage_estimator="grpo"),
+            _minimal_actor(name="b", sglang_server="b", buffer_mode="shared", advantage_estimator="gspo"),
         ]
         with pytest.raises(ValueError, match="advantage_estimator"):
             _validate_shared_buffer_consistency(cfgs)
 
     def test_shared_buffer_n_samples_must_match(self):
         cfgs = [
-            _minimal_actor(name="a", sglang_server="a",
-                           buffer_mode="shared", n_samples_per_prompt=4),
-            _minimal_actor(name="b", sglang_server="b",
-                           buffer_mode="shared", n_samples_per_prompt=8),
+            _minimal_actor(name="a", sglang_server="a", buffer_mode="shared", n_samples_per_prompt=4),
+            _minimal_actor(name="b", sglang_server="b", buffer_mode="shared", n_samples_per_prompt=8),
         ]
         with pytest.raises(ValueError, match="n_samples_per_prompt"):
             _validate_shared_buffer_consistency(cfgs)
 
     def test_split_buffer_no_constraint(self):
         cfgs = [
-            _minimal_actor(name="a", sglang_server="a",
-                           buffer_mode="split", advantage_estimator="grpo",
-                           n_samples_per_prompt=4),
-            _minimal_actor(name="b", sglang_server="b",
-                           buffer_mode="split", advantage_estimator="gspo",
-                           n_samples_per_prompt=8),
+            _minimal_actor(
+                name="a", sglang_server="a", buffer_mode="split", advantage_estimator="grpo", n_samples_per_prompt=4
+            ),
+            _minimal_actor(
+                name="b", sglang_server="b", buffer_mode="split", advantage_estimator="gspo", n_samples_per_prompt=8
+            ),
         ]
         _validate_shared_buffer_consistency(cfgs)  # no raise
 
@@ -256,22 +250,38 @@ class TestParserErrors:
             parse_policy_configs(path)
 
     def test_duplicate_names_at_parse_time(self):
-        path = _write_yaml({
-            "policies": [
-                {
-                    "name": "a", "role": "actor", "hf_checkpoint": "/x",
-                    "num_gpus_per_node": 8, "megatron_num_nodes": 1, "sglang_num_nodes": 1,
-                    "sglang": {"update_weights": True, "num_gpus_per_engine": 8,
-                               "server_groups": [{"worker_type": "regular", "num_gpus": 8}]},
-                },
-                {
-                    "name": "a", "role": "actor", "hf_checkpoint": "/y",
-                    "num_gpus_per_node": 8, "megatron_num_nodes": 1, "sglang_num_nodes": 1,
-                    "sglang": {"update_weights": True, "num_gpus_per_engine": 8,
-                               "server_groups": [{"worker_type": "regular", "num_gpus": 8}]},
-                },
-            ]
-        })
+        path = _write_yaml(
+            {
+                "policies": [
+                    {
+                        "name": "a",
+                        "role": "actor",
+                        "hf_checkpoint": "/x",
+                        "num_gpus_per_node": 8,
+                        "megatron_num_nodes": 1,
+                        "sglang_num_nodes": 1,
+                        "sglang": {
+                            "update_weights": True,
+                            "num_gpus_per_engine": 8,
+                            "server_groups": [{"worker_type": "regular", "num_gpus": 8}],
+                        },
+                    },
+                    {
+                        "name": "a",
+                        "role": "actor",
+                        "hf_checkpoint": "/y",
+                        "num_gpus_per_node": 8,
+                        "megatron_num_nodes": 1,
+                        "sglang_num_nodes": 1,
+                        "sglang": {
+                            "update_weights": True,
+                            "num_gpus_per_engine": 8,
+                            "server_groups": [{"worker_type": "regular", "num_gpus": 8}],
+                        },
+                    },
+                ]
+            }
+        )
         with pytest.raises(ValueError, match="duplicate policy names"):
             parse_policy_configs(path)
 
@@ -293,16 +303,28 @@ class TestClusterSizing:
         # actor: 1×4 + 2×4 = 12; rollout: 1×4 + 1×4 = 8
         cfgs = [
             _minimal_actor(
-                name="a", sglang_server="a",
-                num_gpus_per_node=4, megatron_num_nodes=1, sglang_num_nodes=1,
-                sglang={"update_weights": True, "num_gpus_per_engine": 4,
-                        "server_groups": [{"worker_type": "regular", "num_gpus": 4}]},
+                name="a",
+                sglang_server="a",
+                num_gpus_per_node=4,
+                megatron_num_nodes=1,
+                sglang_num_nodes=1,
+                sglang={
+                    "update_weights": True,
+                    "num_gpus_per_engine": 4,
+                    "server_groups": [{"worker_type": "regular", "num_gpus": 4}],
+                },
             ),
             _minimal_actor(
-                name="b", sglang_server="b",
-                num_gpus_per_node=4, megatron_num_nodes=2, sglang_num_nodes=1,
-                sglang={"update_weights": True, "num_gpus_per_engine": 4,
-                        "server_groups": [{"worker_type": "regular", "num_gpus": 4}]},
+                name="b",
+                sglang_server="b",
+                num_gpus_per_node=4,
+                megatron_num_nodes=2,
+                sglang_num_nodes=1,
+                sglang={
+                    "update_weights": True,
+                    "num_gpus_per_engine": 4,
+                    "server_groups": [{"worker_type": "regular", "num_gpus": 4}],
+                },
             ),
         ]
         for c in cfgs:
@@ -360,12 +382,14 @@ class TestBuildSglangConfig:
             sglang={
                 "update_weights": True,
                 "num_gpus_per_engine": 8,
-                "mem_fraction_static": 0.7,        # model-level
-                "server_groups": [{
-                    "worker_type": "regular",
-                    "num_gpus": 8,
-                    "overrides": {"mem_fraction_static": 0.9},  # per-group override
-                }],
+                "mem_fraction_static": 0.7,  # model-level
+                "server_groups": [
+                    {
+                        "worker_type": "regular",
+                        "num_gpus": 8,
+                        "overrides": {"mem_fraction_static": 0.9},  # per-group override
+                    }
+                ],
             }
         )
         sglang_config = build_sglang_config_from_policies([cfg])
@@ -385,7 +409,7 @@ class TestDerivePolicySlices:
         assert slices["solver"] == list(range(0, 1))
         assert slices["rewriter"] == list(range(1, 2))
         assert slices["selector"] == list(range(2, 3))
-        assert slices["rollout"] == list(range(3))   # rollout shares the whole pool
+        assert slices["rollout"] == list(range(3))  # rollout shares the whole pool
 
     def test_three_policies_no_colocate(self):
         cfgs = parse_policy_configs(EXAMPLE_CONFIG)
@@ -399,21 +423,35 @@ class TestDerivePolicySlices:
     def test_disjoint_actor_slices(self):
         cfgs = parse_policy_configs(EXAMPLE_CONFIG)
         slices = derive_policy_slices(cfgs, list(range(6)), colocate=False)
-        actor_idxs = (
-            set(slices["solver"]) | set(slices["rewriter"]) | set(slices["selector"])
-        )
+        actor_idxs = set(slices["solver"]) | set(slices["rewriter"]) | set(slices["selector"])
         assert len(actor_idxs) == 3  # no overlap between actor slices
 
     def test_two_policies_disjoint(self):
         cfgs = [
-            _minimal_actor(name="a", sglang_server="a",
-                           num_gpus_per_node=4, megatron_num_nodes=1, sglang_num_nodes=1,
-                           sglang={"update_weights": True, "num_gpus_per_engine": 4,
-                                   "server_groups": [{"worker_type": "regular", "num_gpus": 4}]}),
-            _minimal_actor(name="b", sglang_server="b",
-                           num_gpus_per_node=4, megatron_num_nodes=1, sglang_num_nodes=1,
-                           sglang={"update_weights": True, "num_gpus_per_engine": 4,
-                                   "server_groups": [{"worker_type": "regular", "num_gpus": 4}]}),
+            _minimal_actor(
+                name="a",
+                sglang_server="a",
+                num_gpus_per_node=4,
+                megatron_num_nodes=1,
+                sglang_num_nodes=1,
+                sglang={
+                    "update_weights": True,
+                    "num_gpus_per_engine": 4,
+                    "server_groups": [{"worker_type": "regular", "num_gpus": 4}],
+                },
+            ),
+            _minimal_actor(
+                name="b",
+                sglang_server="b",
+                num_gpus_per_node=4,
+                megatron_num_nodes=1,
+                sglang_num_nodes=1,
+                sglang={
+                    "update_weights": True,
+                    "num_gpus_per_engine": 4,
+                    "server_groups": [{"worker_type": "regular", "num_gpus": 4}],
+                },
+            ),
         ]
         for c in cfgs:
             validate_policy_config(c)
@@ -425,14 +463,30 @@ class TestDerivePolicySlices:
     def test_heterogeneous_actor_sizes(self):
         # Policy a: 1 node × 4 = 4 GPUs; policy b: 2 nodes × 4 = 8 GPUs
         cfgs = [
-            _minimal_actor(name="a", sglang_server="a",
-                           num_gpus_per_node=4, megatron_num_nodes=1, sglang_num_nodes=1,
-                           sglang={"update_weights": True, "num_gpus_per_engine": 4,
-                                   "server_groups": [{"worker_type": "regular", "num_gpus": 4}]}),
-            _minimal_actor(name="b", sglang_server="b",
-                           num_gpus_per_node=4, megatron_num_nodes=2, sglang_num_nodes=1,
-                           sglang={"update_weights": True, "num_gpus_per_engine": 4,
-                                   "server_groups": [{"worker_type": "regular", "num_gpus": 4}]}),
+            _minimal_actor(
+                name="a",
+                sglang_server="a",
+                num_gpus_per_node=4,
+                megatron_num_nodes=1,
+                sglang_num_nodes=1,
+                sglang={
+                    "update_weights": True,
+                    "num_gpus_per_engine": 4,
+                    "server_groups": [{"worker_type": "regular", "num_gpus": 4}],
+                },
+            ),
+            _minimal_actor(
+                name="b",
+                sglang_server="b",
+                num_gpus_per_node=4,
+                megatron_num_nodes=2,
+                sglang_num_nodes=1,
+                sglang={
+                    "update_weights": True,
+                    "num_gpus_per_engine": 4,
+                    "server_groups": [{"worker_type": "regular", "num_gpus": 4}],
+                },
+            ),
         ]
         for c in cfgs:
             validate_policy_config(c)
@@ -458,6 +512,7 @@ class TestDerivePolicySlices:
 class TestConfigToNamespace:
     def _base_args(self, **kw):
         from argparse import Namespace
+
         defaults = dict(
             colocate=True,
             num_rollout=100,
@@ -477,8 +532,10 @@ class TestConfigToNamespace:
 
     def test_all_policy_fields_copied(self):
         from slime.utils.policy_config import config_to_namespace
-        cfg = _minimal_actor(name="proposer", sglang_server="proposer",
-                             lr=5e-6, kl_coef=0.001, advantage_estimator="grpo")
+
+        cfg = _minimal_actor(
+            name="proposer", sglang_server="proposer", lr=5e-6, kl_coef=0.001, advantage_estimator="grpo"
+        )
         ns = config_to_namespace(cfg, self._base_args())
         assert ns.name == "proposer"
         assert ns.lr == 5e-6
@@ -488,12 +545,14 @@ class TestConfigToNamespace:
 
     def test_policy_name_set(self):
         from slime.utils.policy_config import config_to_namespace
+
         cfg = _minimal_actor(name="proposer", sglang_server="proposer")
         ns = config_to_namespace(cfg, self._base_args())
         assert ns.policy_name == "proposer"
 
     def test_base_args_preserved(self):
         from slime.utils.policy_config import config_to_namespace
+
         cfg = _minimal_actor()
         ns = config_to_namespace(cfg, self._base_args(num_rollout=5000, save_interval=100))
         assert ns.num_rollout == 5000
@@ -503,6 +562,7 @@ class TestConfigToNamespace:
     def test_policy_field_overrides_base_arg_with_same_name(self):
         """If base_args and PolicyConfig both have a field, PolicyConfig wins."""
         from slime.utils.policy_config import config_to_namespace
+
         cfg = _minimal_actor(lr=9.99)
         # base_args also has lr — but config_to_namespace overwrites it
         ns = config_to_namespace(cfg, self._base_args(lr=1e-3))
@@ -516,52 +576,73 @@ class TestConfigToNamespace:
 
 class TestParserEdgeCases:
     def test_role_defaults_to_actor(self):
-        path = _write_yaml({
-            "policies": [{
-                "name": "a",
-                # role omitted — should default to "actor"
-                "hf_checkpoint": "/x",
-                "num_gpus_per_node": 8,
-                "megatron_num_nodes": 1,
-                "sglang_num_nodes": 1,
-                "sglang": {"update_weights": True, "num_gpus_per_engine": 8,
-                           "server_groups": [{"worker_type": "regular", "num_gpus": 8}]},
-            }]
-        })
+        path = _write_yaml(
+            {
+                "policies": [
+                    {
+                        "name": "a",
+                        # role omitted — should default to "actor"
+                        "hf_checkpoint": "/x",
+                        "num_gpus_per_node": 8,
+                        "megatron_num_nodes": 1,
+                        "sglang_num_nodes": 1,
+                        "sglang": {
+                            "update_weights": True,
+                            "num_gpus_per_engine": 8,
+                            "server_groups": [{"worker_type": "regular", "num_gpus": 8}],
+                        },
+                    }
+                ]
+            }
+        )
         cfgs = parse_policy_configs(path)
         assert cfgs[0].role == "actor"
 
     def test_buffer_mode_defaults_to_split(self):
-        path = _write_yaml({
-            "policies": [{
-                "name": "a",
-                "role": "actor",
-                "hf_checkpoint": "/x",
-                # buffer_mode omitted
-                "num_gpus_per_node": 8,
-                "megatron_num_nodes": 1,
-                "sglang_num_nodes": 1,
-                "sglang": {"update_weights": True, "num_gpus_per_engine": 8,
-                           "server_groups": [{"worker_type": "regular", "num_gpus": 8}]},
-            }]
-        })
+        path = _write_yaml(
+            {
+                "policies": [
+                    {
+                        "name": "a",
+                        "role": "actor",
+                        "hf_checkpoint": "/x",
+                        # buffer_mode omitted
+                        "num_gpus_per_node": 8,
+                        "megatron_num_nodes": 1,
+                        "sglang_num_nodes": 1,
+                        "sglang": {
+                            "update_weights": True,
+                            "num_gpus_per_engine": 8,
+                            "server_groups": [{"worker_type": "regular", "num_gpus": 8}],
+                        },
+                    }
+                ]
+            }
+        )
         cfgs = parse_policy_configs(path)
         assert cfgs[0].buffer_mode == "split"
 
     def test_ref_load_optional(self):
-        path = _write_yaml({
-            "policies": [{
-                "name": "a",
-                "role": "actor",
-                "hf_checkpoint": "/x",
-                "ref_load": "/ref",   # provided
-                "num_gpus_per_node": 8,
-                "megatron_num_nodes": 1,
-                "sglang_num_nodes": 1,
-                "sglang": {"update_weights": True, "num_gpus_per_engine": 8,
-                           "server_groups": [{"worker_type": "regular", "num_gpus": 8}]},
-            }]
-        })
+        path = _write_yaml(
+            {
+                "policies": [
+                    {
+                        "name": "a",
+                        "role": "actor",
+                        "hf_checkpoint": "/x",
+                        "ref_load": "/ref",  # provided
+                        "num_gpus_per_node": 8,
+                        "megatron_num_nodes": 1,
+                        "sglang_num_nodes": 1,
+                        "sglang": {
+                            "update_weights": True,
+                            "num_gpus_per_engine": 8,
+                            "server_groups": [{"worker_type": "regular", "num_gpus": 8}],
+                        },
+                    }
+                ]
+            }
+        )
         assert parse_policy_configs(path)[0].ref_load == "/ref"
 
     def test_ref_load_default_none(self):
@@ -572,55 +653,76 @@ class TestParserEdgeCases:
     def test_unknown_top_level_field_silently_dropped(self):
         # Top-level fields are picked by name in the parser; unknown ones are simply
         # not forwarded to PolicyConfig. Documenting actual behavior.
-        path = _write_yaml({
-            "policies": [{
-                "name": "a",
-                "role": "actor",
-                "hf_checkpoint": "/x",
-                "wizardly_field": True,    # silently ignored
-                "num_gpus_per_node": 8,
-                "megatron_num_nodes": 1,
-                "sglang_num_nodes": 1,
-                "sglang": {"update_weights": True, "num_gpus_per_engine": 8,
-                           "server_groups": [{"worker_type": "regular", "num_gpus": 8}]},
-            }]
-        })
+        path = _write_yaml(
+            {
+                "policies": [
+                    {
+                        "name": "a",
+                        "role": "actor",
+                        "hf_checkpoint": "/x",
+                        "wizardly_field": True,  # silently ignored
+                        "num_gpus_per_node": 8,
+                        "megatron_num_nodes": 1,
+                        "sglang_num_nodes": 1,
+                        "sglang": {
+                            "update_weights": True,
+                            "num_gpus_per_engine": 8,
+                            "server_groups": [{"worker_type": "regular", "num_gpus": 8}],
+                        },
+                    }
+                ]
+            }
+        )
         cfgs = parse_policy_configs(path)
         assert len(cfgs) == 1
         assert not hasattr(cfgs[0], "wizardly_field")
 
     def test_unknown_megatron_field_rejected(self):
         # Fields inside megatron: are **-spread into PolicyConfig — unknowns raise TypeError.
-        path = _write_yaml({
-            "policies": [{
-                "name": "a",
-                "role": "actor",
-                "hf_checkpoint": "/x",
-                "num_gpus_per_node": 8,
-                "megatron_num_nodes": 1,
-                "sglang_num_nodes": 1,
-                "megatron": {"wizardly_field": True},   # not a PolicyConfig field
-                "sglang": {"update_weights": True, "num_gpus_per_engine": 8,
-                           "server_groups": [{"worker_type": "regular", "num_gpus": 8}]},
-            }]
-        })
+        path = _write_yaml(
+            {
+                "policies": [
+                    {
+                        "name": "a",
+                        "role": "actor",
+                        "hf_checkpoint": "/x",
+                        "num_gpus_per_node": 8,
+                        "megatron_num_nodes": 1,
+                        "sglang_num_nodes": 1,
+                        "megatron": {"wizardly_field": True},  # not a PolicyConfig field
+                        "sglang": {
+                            "update_weights": True,
+                            "num_gpus_per_engine": 8,
+                            "server_groups": [{"worker_type": "regular", "num_gpus": 8}],
+                        },
+                    }
+                ]
+            }
+        )
         with pytest.raises(TypeError):
             parse_policy_configs(path)
 
     def test_megatron_block_optional(self):
         # If megatron: is missing, all megatron fields use PolicyConfig defaults
-        path = _write_yaml({
-            "policies": [{
-                "name": "a",
-                "role": "actor",
-                "hf_checkpoint": "/x",
-                "num_gpus_per_node": 8,
-                "megatron_num_nodes": 1,
-                "sglang_num_nodes": 1,
-                "sglang": {"update_weights": True, "num_gpus_per_engine": 8,
-                           "server_groups": [{"worker_type": "regular", "num_gpus": 8}]},
-            }]
-        })
+        path = _write_yaml(
+            {
+                "policies": [
+                    {
+                        "name": "a",
+                        "role": "actor",
+                        "hf_checkpoint": "/x",
+                        "num_gpus_per_node": 8,
+                        "megatron_num_nodes": 1,
+                        "sglang_num_nodes": 1,
+                        "sglang": {
+                            "update_weights": True,
+                            "num_gpus_per_engine": 8,
+                            "server_groups": [{"worker_type": "regular", "num_gpus": 8}],
+                        },
+                    }
+                ]
+            }
+        )
         cfgs = parse_policy_configs(path)
         # Defaults from PolicyConfig
         assert cfgs[0].tensor_model_parallel_size == 1
@@ -659,8 +761,7 @@ class TestBuildSglangSplit:
             assert g.overrides["mem_fraction_static"] == 0.7
 
     def test_no_sglang_block_rejected(self):
-        cfg = PolicyConfig(name="a", role="actor", hf_checkpoint="/x", sglang_server="a",
-                           num_gpus_per_node=8)
+        cfg = PolicyConfig(name="a", role="actor", hf_checkpoint="/x", sglang_server="a", num_gpus_per_node=8)
         # No `sglang` sub-block → build raises (validate_policy_config skips since cfg.sglang is None)
         with pytest.raises(ValueError, match="missing 'sglang' sub-block"):
             build_sglang_config_from_policies([cfg])
@@ -773,7 +874,9 @@ class TestExampleInvariants:
 
 class TestLauncherConsistency:
     LAUNCHER_PATH = os.path.join(
-        _REPO_ROOT, "examples", "multi_policy_multi_agent",
+        _REPO_ROOT,
+        "examples",
+        "multi_policy_multi_agent",
         "run-qwen3-0.6B-multi-policy-multi-agent.sh",
     )
     ARGUMENTS_PATH = os.path.join(_REPO_ROOT, "slime", "utils", "arguments.py")
@@ -790,6 +893,7 @@ class TestLauncherConsistency:
 
         # Find NUM_GPUS=<n> declaration
         import re
+
         m = re.search(r"^NUM_GPUS=(\d+)", launcher, re.MULTILINE)
         assert m, "launcher must declare NUM_GPUS=<int>"
         launcher_num_gpus = int(m.group(1))
@@ -824,12 +928,8 @@ class TestLauncherConsistency:
 
 
 class TestExampleSourceStatic:
-    AGENT_SYSTEM = os.path.join(
-        _REPO_ROOT, "examples", "multi_policy_multi_agent", "agent_system.py"
-    )
-    ROLLOUT_FN = os.path.join(
-        _REPO_ROOT, "examples", "multi_policy_multi_agent", "rollout_with_multi_agents.py"
-    )
+    AGENT_SYSTEM = os.path.join(_REPO_ROOT, "examples", "multi_policy_multi_agent", "agent_system.py")
+    ROLLOUT_FN = os.path.join(_REPO_ROOT, "examples", "multi_policy_multi_agent", "rollout_with_multi_agents.py")
 
     def test_agent_system_imports_get_model_url(self):
         """Edit 1 (URL routing): agent_system.py must import get_model_url from sglang_rollout."""
@@ -859,12 +959,10 @@ class TestExampleSourceStatic:
         """Edit 3 (selector parallel): a select_worker function must exist
         alongside solver_worker and rewrite_worker."""
         import ast
+
         with open(self.AGENT_SYSTEM) as f:
             tree = ast.parse(f.read())
-        fn_names = {
-            n.name for n in ast.walk(tree)
-            if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef))
-        }
+        fn_names = {n.name for n in ast.walk(tree) if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef))}
         assert "select_worker" in fn_names
         assert "solver_worker" in fn_names
         assert "rewrite_worker" in fn_names
@@ -888,6 +986,7 @@ class TestExampleSourceStatic:
         """Bug 1 fix: num_parallel must equal n_samples_per_prompt across all
         policies, which is 4 in the current smoke-test config.yaml."""
         import ast
+
         with open(self.ROLLOUT_FN) as f:
             tree = ast.parse(f.read())
         # Find the MULTI_AGENT_CONFIGS dict assignment
@@ -901,7 +1000,7 @@ class TestExampleSourceStatic:
         assert configs_dict is not None, "MULTI_AGENT_CONFIGS not found"
         # Walk the dict literal to find num_parallel
         num_parallel = None
-        for k, v in zip(configs_dict.keys, configs_dict.values):
+        for k, v in zip(configs_dict.keys, configs_dict.values, strict=True):
             if isinstance(k, ast.Constant) and k.value == "num_parallel":
                 num_parallel = v.value if isinstance(v, ast.Constant) else None
                 break
@@ -1013,18 +1112,25 @@ class TestEdgeCases:
     def test_single_policy_run_works(self):
         """N=1 should be a valid degenerate case (essentially equivalent to single-policy
         but going through the multi-policy code path)."""
-        path = _write_yaml({
-            "policies": [{
-                "name": "actor",
-                "role": "actor",
-                "hf_checkpoint": "/m",
-                "num_gpus_per_node": 8,
-                "megatron_num_nodes": 1,
-                "sglang_num_nodes": 1,
-                "sglang": {"update_weights": True, "num_gpus_per_engine": 8,
-                           "server_groups": [{"worker_type": "regular", "num_gpus": 8}]},
-            }]
-        })
+        path = _write_yaml(
+            {
+                "policies": [
+                    {
+                        "name": "actor",
+                        "role": "actor",
+                        "hf_checkpoint": "/m",
+                        "num_gpus_per_node": 8,
+                        "megatron_num_nodes": 1,
+                        "sglang_num_nodes": 1,
+                        "sglang": {
+                            "update_weights": True,
+                            "num_gpus_per_engine": 8,
+                            "server_groups": [{"worker_type": "regular", "num_gpus": 8}],
+                        },
+                    }
+                ]
+            }
+        )
         cfgs = parse_policy_configs(path)
         assert len(cfgs) == 1
         actor, rollout, total = derive_cluster_sizing(cfgs, colocate=True)
@@ -1041,6 +1147,7 @@ class TestPolicyHandleDataclass:
         """PolicyHandle is a pure dataclass in slime.utils.policy_config — no Ray dep."""
         from argparse import Namespace
         from slime.utils.policy_config import PolicyHandle
+
         cfg = _minimal_actor()
         ns = Namespace(policy_name="solver", lr=1e-6)
         handle = PolicyHandle(config=cfg, args=ns, train_group=object())
@@ -1053,6 +1160,7 @@ class TestPolicyHandleDataclass:
         import dataclasses
 
         from slime.utils.policy_config import PolicyHandle
+
         names = {f.name for f in dataclasses.fields(PolicyHandle)}
         assert names == {"config", "args", "train_group"}
 
@@ -1061,6 +1169,7 @@ class TestPolicyHandleDataclass:
         on recovery. Do not flip this to frozen=True without auditing call sites."""
         from argparse import Namespace
         from slime.utils.policy_config import PolicyHandle
+
         h = PolicyHandle(config=_minimal_actor(), args=Namespace(), train_group="a")
         h.train_group = "b"  # must not raise
         assert h.train_group == "b"
@@ -1071,6 +1180,7 @@ class TestPolicyHandleDataclass:
         relies on (policy_name, hf_checkpoint, role, sglang_server)."""
         from argparse import Namespace
         from slime.utils.policy_config import PolicyHandle, config_to_namespace
+
         cfg = _minimal_actor()  # name="solver"
         base = Namespace(kl_coef=0.0, use_kl_loss=False, lr=1e-6)
         args_p = config_to_namespace(cfg, base)
@@ -1113,6 +1223,7 @@ class TestConfigToNamespaceProjection:
     def test_global_fields_inherited_from_base(self):
         from argparse import Namespace
         from slime.utils.policy_config import config_to_namespace
+
         base = Namespace(num_rollout=10, save_interval=5, custom_path="/x")
         ns = config_to_namespace(_minimal_actor(), base)
         assert ns.num_rollout == 10
@@ -1124,6 +1235,7 @@ class TestConfigToNamespaceProjection:
         field wins (e.g. global hf_checkpoint default replaced by per-policy)."""
         from argparse import Namespace
         from slime.utils.policy_config import config_to_namespace
+
         base = Namespace(hf_checkpoint="/global/path")
         cfg = _minimal_actor()  # cfg.hf_checkpoint != "/global/path"
         ns = config_to_namespace(cfg, base)
@@ -1135,6 +1247,7 @@ class TestConfigToNamespaceProjection:
         downstream Megatron code reads args.policy_name for weight-update routing."""
         from argparse import Namespace
         from slime.utils.policy_config import config_to_namespace
+
         ns = config_to_namespace(_minimal_actor(), Namespace())
         assert ns.policy_name == "solver"
 
@@ -1143,6 +1256,7 @@ class TestConfigToNamespaceProjection:
         The per-policy namespace must not inherit stale global sizing."""
         from argparse import Namespace
         from slime.utils.policy_config import config_to_namespace
+
         cfg = _minimal_actor(megatron_num_nodes=2, num_gpus_per_node=4)
         base = Namespace(actor_num_nodes=99, actor_num_gpus_per_node=99, num_gpus_per_node=99, world_size=99)
         ns = config_to_namespace(cfg, base)
@@ -1154,6 +1268,7 @@ class TestConfigToNamespaceProjection:
     def test_does_not_mutate_base_args(self):
         from argparse import Namespace
         from slime.utils.policy_config import config_to_namespace
+
         base = Namespace(hf_checkpoint="/global", kl_coef=0.5)
         original = vars(base).copy()
         _ = config_to_namespace(_minimal_actor(), base)
@@ -1162,6 +1277,7 @@ class TestConfigToNamespaceProjection:
     def test_does_not_mutate_cfg(self):
         from argparse import Namespace
         from slime.utils.policy_config import config_to_namespace
+
         cfg = _minimal_actor()
         before = dataclasses.asdict(cfg)
         _ = config_to_namespace(cfg, Namespace())
@@ -1177,8 +1293,8 @@ class TestConfigToNamespaceProjection:
 class TestWeightLoadFallback:
     def _ns(self, **overrides):
         from argparse import Namespace
-        defaults = dict(no_load_optim=False, no_load_rng=False, finetune=False, ref_load=None,
-                        start_rollout_id=None)
+
+        defaults = dict(no_load_optim=False, no_load_rng=False, finetune=False, ref_load=None, start_rollout_id=None)
         defaults.update(overrides)
         return Namespace(**defaults)
 
@@ -1187,8 +1303,8 @@ class TestWeightLoadFallback:
         ref_load None → ns.load = cfg.hf_checkpoint. mbridge then resolves
         the hub id at AutoBridge.from_hf_pretrained time."""
         from slime.utils.policy_config import config_to_namespace
-        cfg = _minimal_actor(megatron_to_hf_mode="bridge", load=None, ref_load=None,
-                             hf_checkpoint="Qwen/Qwen3-0.6B")
+
+        cfg = _minimal_actor(megatron_to_hf_mode="bridge", load=None, ref_load=None, hf_checkpoint="Qwen/Qwen3-0.6B")
         ns = config_to_namespace(cfg, self._ns())
         assert ns.load == "Qwen/Qwen3-0.6B"
         assert ns.start_rollout_id == 0
@@ -1197,6 +1313,7 @@ class TestWeightLoadFallback:
         """If `load` points at a real torch_dist Megatron ckpt, bridge mode
         respects it (resumes instead of HF-loading)."""
         from slime.utils.policy_config import config_to_namespace
+
         ckpt = tmp_path / "ckpt"
         ckpt.mkdir()
         (ckpt / "latest_checkpointed_iteration.txt").write_text("100")
@@ -1207,6 +1324,7 @@ class TestWeightLoadFallback:
     def test_bridge_uses_ref_load_when_set(self):
         """Bridge mode + load None + ref_load set → ns.load = ref_load."""
         from slime.utils.policy_config import config_to_namespace
+
         cfg = _minimal_actor(megatron_to_hf_mode="bridge", load=None, ref_load="/path/ref")
         ns = config_to_namespace(cfg, self._ns())
         assert ns.load == "/path/ref"
@@ -1215,6 +1333,7 @@ class TestWeightLoadFallback:
         """Default raw mode + no real ckpt → mirror slime_validate_args:
         no_load_optim=True, no_load_rng=True, finetune=True, start_rollout_id=0."""
         from slime.utils.policy_config import config_to_namespace
+
         cfg = _minimal_actor(megatron_to_hf_mode="raw", load="/does/not/exist")
         ns = config_to_namespace(cfg, self._ns())
         assert ns.no_load_optim is True
@@ -1230,19 +1349,21 @@ class TestEpsClipHighDefaulting:
 
     def _ns(self, **overrides):
         from argparse import Namespace
-        defaults = dict(no_load_optim=False, no_load_rng=False, finetune=False,
-                        ref_load=None, start_rollout_id=None)
+
+        defaults = dict(no_load_optim=False, no_load_rng=False, finetune=False, ref_load=None, start_rollout_id=None)
         defaults.update(overrides)
         return Namespace(**defaults)
 
     def test_eps_clip_high_defaults_to_eps_clip_when_none(self):
         from slime.utils.policy_config import config_to_namespace
+
         cfg = _minimal_actor(eps_clip=0.2, eps_clip_high=None)
         ns = config_to_namespace(cfg, self._ns())
         assert ns.eps_clip_high == 0.2
 
     def test_explicit_eps_clip_high_preserved(self):
         from slime.utils.policy_config import config_to_namespace
+
         cfg = _minimal_actor(eps_clip=0.2, eps_clip_high=0.28)
         ns = config_to_namespace(cfg, self._ns())
         assert ns.eps_clip_high == 0.28
@@ -1254,8 +1375,8 @@ class TestPerPolicyDerivedDefaults:
 
     def _ns(self, **overrides):
         from argparse import Namespace
-        defaults = dict(no_load_optim=False, no_load_rng=False, finetune=False,
-                        ref_load=None, start_rollout_id=None)
+
+        defaults = dict(no_load_optim=False, no_load_rng=False, finetune=False, ref_load=None, start_rollout_id=None)
         defaults.update(overrides)
         return Namespace(**defaults)
 
@@ -1264,12 +1385,14 @@ class TestPerPolicyDerivedDefaults:
         → group-norm divides by zero. Upstream forces grpo_std_normalization
         off; mirror it per-policy."""
         from slime.utils.policy_config import config_to_namespace
+
         cfg = _minimal_actor(n_samples_per_prompt=1, grpo_std_normalization=True)
         ns = config_to_namespace(cfg, self._ns())
         assert ns.grpo_std_normalization is False
 
     def test_grpo_std_normalization_kept_when_n_samples_gt_1(self):
         from slime.utils.policy_config import config_to_namespace
+
         cfg = _minimal_actor(n_samples_per_prompt=4, grpo_std_normalization=True)
         ns = config_to_namespace(cfg, self._ns())
         assert ns.grpo_std_normalization is True
@@ -1279,15 +1402,15 @@ class TestPerPolicyDerivedDefaults:
         defaults to max_tokens_per_gpu — same dynamic-batch budget as the
         train forward."""
         from slime.utils.policy_config import config_to_namespace
-        cfg = _minimal_actor(use_dynamic_batch_size=True, max_tokens_per_gpu=8192,
-                             log_probs_max_tokens_per_gpu=None)
+
+        cfg = _minimal_actor(use_dynamic_batch_size=True, max_tokens_per_gpu=8192, log_probs_max_tokens_per_gpu=None)
         ns = config_to_namespace(cfg, self._ns())
         assert ns.log_probs_max_tokens_per_gpu == 8192
 
     def test_log_probs_max_tokens_per_gpu_explicit_preserved(self):
         from slime.utils.policy_config import config_to_namespace
-        cfg = _minimal_actor(use_dynamic_batch_size=True, max_tokens_per_gpu=8192,
-                             log_probs_max_tokens_per_gpu=2048)
+
+        cfg = _minimal_actor(use_dynamic_batch_size=True, max_tokens_per_gpu=8192, log_probs_max_tokens_per_gpu=2048)
         ns = config_to_namespace(cfg, self._ns())
         assert ns.log_probs_max_tokens_per_gpu == 2048
 
@@ -1295,8 +1418,8 @@ class TestPerPolicyDerivedDefaults:
         """Without use_dynamic_batch_size, slime never reads this knob; leave
         it None (matches upstream behavior — no defaulting branch fires)."""
         from slime.utils.policy_config import config_to_namespace
-        cfg = _minimal_actor(use_dynamic_batch_size=False, max_tokens_per_gpu=8192,
-                             log_probs_max_tokens_per_gpu=None)
+
+        cfg = _minimal_actor(use_dynamic_batch_size=False, max_tokens_per_gpu=8192, log_probs_max_tokens_per_gpu=None)
         ns = config_to_namespace(cfg, self._ns())
         assert ns.log_probs_max_tokens_per_gpu is None
 

@@ -27,8 +27,7 @@ if _REPO_ROOT not in sys.path:
 # Skip the file when any of those are missing.
 for _mod in ("ray", "torch", "megatron", "transformers"):
     if importlib.util.find_spec(_mod) is None:
-        pytest.skip(f"{_mod} not installed; skipping update_weights routing tests",
-                    allow_module_level=True)
+        pytest.skip(f"{_mod} not installed; skipping update_weights routing tests", allow_module_level=True)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -39,17 +38,18 @@ for _mod in ("ray", "torch", "megatron", "transformers"):
 def _make_actor(args):
     """Construct a MegatronTrainRayActor skipping the heavy __init__."""
     from slime.backends.megatron_utils.actor import MegatronTrainRayActor
-    cls = (MegatronTrainRayActor.__ray_actor_class__
-           if hasattr(MegatronTrainRayActor, "__ray_actor_class__")
-           else MegatronTrainRayActor)
+
+    cls = (
+        MegatronTrainRayActor.__ray_actor_class__
+        if hasattr(MegatronTrainRayActor, "__ray_actor_class__")
+        else MegatronTrainRayActor
+    )
     actor = cls.__new__(cls)
     actor.args = args
     actor.rollout_manager = MagicMock(name="rollout_manager")
     # update_weights returns the 5-tuple (engines, lock, num_new, gpu_counts, gpu_offsets).
     # num_new=0 short-circuits the connect_rollout_engines / weight_updater path.
-    actor.rollout_manager.get_engines_and_lock.remote = MagicMock(
-        return_value=([], MagicMock(name="lock"), 0, [], [])
-    )
+    actor.rollout_manager.get_engines_and_lock.remote = MagicMock(return_value=([], MagicMock(name="lock"), 0, [], []))
     actor.weight_updater = MagicMock(name="weight_updater")
     return actor
 
@@ -88,13 +88,13 @@ class TestUpdateWeightsRouting:
         → manager falls back to _get_updatable_server (legacy path)."""
         actor = _make_actor(_legacy_args())
 
-        with patch("slime.backends.megatron_utils.actor.ray.get",
-                   side_effect=lambda x: x.return_value if isinstance(x, MagicMock) else x):
+        with patch(
+            "slime.backends.megatron_utils.actor.ray.get",
+            side_effect=lambda x: x.return_value if isinstance(x, MagicMock) else x,
+        ):
             actor.update_weights()
 
-        actor.rollout_manager.get_engines_and_lock.remote.assert_called_once_with(
-            policy_name=None
-        )
+        actor.rollout_manager.get_engines_and_lock.remote.assert_called_once_with(policy_name=None)
         # Legacy method must NOT be called (we replaced it)
         actor.rollout_manager.get_updatable_engines_and_lock.remote.assert_not_called()
 
@@ -104,24 +104,24 @@ class TestUpdateWeightsRouting:
         _policy_to_server['solver']."""
         actor = _make_actor(_multi_policy_args("solver"))
 
-        with patch("slime.backends.megatron_utils.actor.ray.get",
-                   side_effect=lambda x: x.return_value if isinstance(x, MagicMock) else x):
+        with patch(
+            "slime.backends.megatron_utils.actor.ray.get",
+            side_effect=lambda x: x.return_value if isinstance(x, MagicMock) else x,
+        ):
             actor.update_weights()
 
-        actor.rollout_manager.get_engines_and_lock.remote.assert_called_once_with(
-            policy_name="solver"
-        )
+        actor.rollout_manager.get_engines_and_lock.remote.assert_called_once_with(policy_name="solver")
 
     def test_multi_policy_three_distinct_routes(self):
         """SPIRAL/multi-agent: each policy's update_weights routes independently."""
         for name in ("solver", "rewriter", "selector"):
             actor = _make_actor(_multi_policy_args(name))
-            with patch("slime.backends.megatron_utils.actor.ray.get",
-                       side_effect=lambda x: x.return_value if isinstance(x, MagicMock) else x):
+            with patch(
+                "slime.backends.megatron_utils.actor.ray.get",
+                side_effect=lambda x: x.return_value if isinstance(x, MagicMock) else x,
+            ):
                 actor.update_weights()
-            actor.rollout_manager.get_engines_and_lock.remote.assert_called_once_with(
-                policy_name=name
-            )
+            actor.rollout_manager.get_engines_and_lock.remote.assert_called_once_with(policy_name=name)
 
     def test_explicit_none_attribute_routes_with_none(self):
         """Edge case: args explicitly has policy_name=None (e.g. driver sets it
@@ -130,13 +130,13 @@ class TestUpdateWeightsRouting:
         ns.policy_name = None
         actor = _make_actor(ns)
 
-        with patch("slime.backends.megatron_utils.actor.ray.get",
-                   side_effect=lambda x: x.return_value if isinstance(x, MagicMock) else x):
+        with patch(
+            "slime.backends.megatron_utils.actor.ray.get",
+            side_effect=lambda x: x.return_value if isinstance(x, MagicMock) else x,
+        ):
             actor.update_weights()
 
-        actor.rollout_manager.get_engines_and_lock.remote.assert_called_once_with(
-            policy_name=None
-        )
+        actor.rollout_manager.get_engines_and_lock.remote.assert_called_once_with(policy_name=None)
 
 
 # ────────────────────────────────────────────────────────────────────────────

@@ -168,6 +168,7 @@ async def generate_response(args, prompt, key, track: bool = True, wid: int | No
 
 # --- agent classes ---
 
+
 class _Agent:
     async def _run(self, args, prompt, key, max_retries: int = 3, track: bool = True, wid: int | None = None) -> str:
         for _ in range(max_retries):
@@ -218,6 +219,7 @@ async def summarize_subroutine(args, other_responses: list[str], wid: int = 0) -
 
 # --- workers ---
 
+
 async def round0_worker(args, problem_statement, wid):
     try:
         return await GeneratorAgent().propose(args, problem_statement, wid=wid)
@@ -235,6 +237,7 @@ async def critic_worker(args, problem_statement, prior_response, summary, wid):
 
 
 # --- buffer-count invariant ---
+
 
 def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None = None):
     """Pad to exactly `target_count`. Last-resort fallback uses `args.sample`
@@ -266,12 +269,12 @@ def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None 
     if used_args_sample:
         outer_idx = getattr(args.sample, "index", "?")
         logger.warning(
-            f"_pad_role_buffer: no-donor fallback fired for role={role} "
-            f"(outer prompt index={outer_idx})."
+            f"_pad_role_buffer: no-donor fallback fired for role={role} " f"(outer prompt index={outer_idx})."
         )
 
 
 # --- per-agent ordering helper ---
+
 
 def _by_wid(samples: list[Sample], n: int) -> list[Sample | None]:
     """Sort `samples` into a length-n list where position i = the sample with
@@ -289,6 +292,7 @@ def _by_wid(samples: list[Sample], n: int) -> list[Sample | None]:
 
 
 # --- paper-aligned grading: extracted-boxed string equality ---
+
 
 def _normalize_answer(ans: str | None) -> str | None:
     if ans is None:
@@ -326,6 +330,7 @@ def _majority_vote(answers: list[str | None]) -> str | None:
 
 # --- orchestration ---
 
+
 async def run_agent_system(args, sample):
     """One slot of debate. Reward is computed AFTER all rounds finish, by
     majority-voting on final critic responses (ŷ) and grading each sample
@@ -336,11 +341,11 @@ async def run_agent_system(args, sample):
     args.results_dict = {"generator": [], "critic": []}
 
     raw_problem = _strip_chat_tokens(sample.prompt)
-    n = args.num_parallel              # 3
-    rounds = args.rounds               # 3 (m=0 generator, m=1,2 critic)
+    n = args.num_parallel  # 3
+    rounds = args.rounds  # 3 (m=0 generator, m=1,2 critic)
 
-    target_gen = n                     # 3
-    target_critic = n * (rounds - 1)   # 6
+    target_gen = n  # 3
+    target_critic = n * (rounds - 1)  # 6
 
     # ---- Round 0: N parallel generators (defer grading) ----
     gen_count_before = len(args.results_dict["generator"])
@@ -350,10 +355,7 @@ async def run_agent_system(args, sample):
     gen_samples_by_wid = _by_wid(gen_samples_unsorted, n)  # [sample_or_None × n]
 
     # prev_responses[i] = wid-i agent's previous-round response (or "")
-    prev_responses = [
-        (s.response_content if s and s.response_content is not None else "")
-        for s in gen_samples_by_wid
-    ]
+    prev_responses = [(s.response_content if s and s.response_content is not None else "") for s in gen_samples_by_wid]
 
     # If round 0 didn't produce N usable responses, abort the debate.
     if sum(1 for r in prev_responses if r) < n:
@@ -367,7 +369,7 @@ async def run_agent_system(args, sample):
     critic_trajectory: list[list[Sample]] = [[] for _ in range(n)]
 
     # ---- Rounds 1..M-1: summarize + critic ----
-    for m in range(1, rounds):
+    for _round_idx in range(1, rounds):
         # Summarize: agent-i's summary covers OTHERS' previous-round responses.
         summary_tasks = []
         for i in range(n):
@@ -378,10 +380,7 @@ async def run_agent_system(args, sample):
 
         # Critic: each agent gets paired summary + its own prior response.
         critic_count_before = len(args.results_dict["critic"])
-        critic_tasks = [
-            critic_worker(args, raw_problem, prev_responses[i], summaries[i], wid=i)
-            for i in range(n)
-        ]
+        critic_tasks = [critic_worker(args, raw_problem, prev_responses[i], summaries[i], wid=i) for i in range(n)]
         await asyncio.gather(*critic_tasks, return_exceptions=True)
         round_critic_unsorted = args.results_dict["critic"][critic_count_before:]
         round_critic_by_wid = _by_wid(round_critic_unsorted, n)
@@ -436,7 +435,7 @@ async def run_agent_system(args, sample):
         return args.results_dict["generator"] + args.results_dict["critic"]
 
     # ---- Generator reward: 1 if y_{1,n} = ŷ (per-sample, by wid) ----
-    for i, s in enumerate(gen_samples_by_wid):
+    for s in gen_samples_by_wid:
         if s is None:
             continue
         s.reward = 1.0 if _matches(s, y_hat) else 0.0

@@ -326,8 +326,7 @@ async def run_agent_system(args, sample):
     # Rewriting — feed the raw (un-chat-templated) problem to the rewriter
     # template so the inner solver chat tokens don't leak through.
     tasks = [
-        rewrite_worker(args, previous_solutions, raw_problem, worker_id)
-        for worker_id in range(args.num_parallel)
+        rewrite_worker(args, previous_solutions, raw_problem, worker_id) for worker_id in range(args.num_parallel)
     ]
     rewrited_solutions_raw = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -354,10 +353,7 @@ async def run_agent_system(args, sample):
     # Selector also receives the raw problem (no chat tokens) — its template
     # will chat-template the whole thing as a user turn.
     selector = SelectorAgent()  # used for extract_selected_solution_idx
-    tasks = [
-        select_worker(args, raw_problem, rewrited_solutions, worker_id)
-        for worker_id in range(args.num_parallel)
-    ]
+    tasks = [select_worker(args, raw_problem, rewrited_solutions, worker_id) for worker_id in range(args.num_parallel)]
     await asyncio.gather(*tasks, return_exceptions=True)
 
     if len(args.results_dict["selector"]) == 0:
