@@ -133,8 +133,7 @@ class PolicyConfig:
 def validate_policy_config(cfg: PolicyConfig) -> None:
     if cfg.role != "actor":
         raise ValueError(
-            f"{cfg.name}: only role='actor' supported, got {cfg.role!r} "
-            f"(critic deferred — PPO out of scope)"
+            f"{cfg.name}: only role='actor' supported, got {cfg.role!r} " f"(critic deferred — PPO out of scope)"
         )
     if cfg.sglang_server is None:
         raise ValueError(f"{cfg.name}: actor requires sglang_server (1:1 pairing)")
@@ -238,11 +237,7 @@ def build_sglang_config_from_policies(configs: list[PolicyConfig]):
     map directly onto ModelConfig. All other fields are sglang ServerArgs and get
     folded into each ServerGroupConfig.overrides for upstream's _compute_server_args.
     """
-    from slime.backends.sglang_utils.sglang_config import (
-        ModelConfig,
-        ServerGroupConfig,
-        SglangConfig,
-    )
+    from slime.backends.sglang_utils.sglang_config import ModelConfig, ServerGroupConfig, SglangConfig
 
     MODEL_FIELDS = {"model_path", "num_gpus_per_engine", "update_weights", "server_groups"}
 
@@ -295,12 +290,12 @@ class PolicyHandle:
     iterates a dict[name, PolicyHandle] returned from there.
     """
 
-    config: "PolicyConfig"
-    args: "Any"  # PolicyConfig projected onto a Namespace for downstream Megatron code
-    train_group: "Any"  # RayTrainGroup
+    config: PolicyConfig
+    args: Any  # PolicyConfig projected onto a Namespace for downstream Megatron code
+    train_group: Any  # RayTrainGroup
 
 
-def config_to_namespace(cfg: "PolicyConfig", base_args):
+def config_to_namespace(cfg: PolicyConfig, base_args):
     """Project PolicyConfig fields onto a Namespace, copying everything directly.
 
     Pulls non-policy globals (rollout cadence, data paths, perf args) from base_args.
@@ -310,6 +305,7 @@ def config_to_namespace(cfg: "PolicyConfig", base_args):
     Pure function — used by create_training_models_multi to build per-policy Namespaces.
     """
     from argparse import Namespace
+
     ns = Namespace(**vars(base_args))
     for f in dataclasses.fields(cfg):
         setattr(ns, f.name, getattr(cfg, f.name))
@@ -354,6 +350,7 @@ def config_to_namespace(cfg: "PolicyConfig", base_args):
     # policy, and each per-policy actor lands at the same args state it would
     # have reached through legacy CLI flags.
     import os
+
     if ns.megatron_to_hf_mode == "bridge":
         if (
             ns.load is not None
@@ -384,9 +381,7 @@ def config_to_namespace(cfg: "PolicyConfig", base_args):
     return ns
 
 
-def derive_policy_slices(
-    configs: list[PolicyConfig], total_idxs: list[int], colocate: bool
-) -> dict[str, list[int]]:
+def derive_policy_slices(configs: list[PolicyConfig], total_idxs: list[int], colocate: bool) -> dict[str, list[int]]:
     """Carve global placement-group indices into per-policy actor slices + a rollout slice.
 
     Pure function — no Ray. Mirrors the carving logic of create_placement_groups_multi
@@ -398,9 +393,7 @@ def derive_policy_slices(
     """
     actor_gpus, rollout_gpus, total = derive_cluster_sizing(configs, colocate=colocate)
     if len(total_idxs) != total:
-        raise ValueError(
-            f"total_idxs has {len(total_idxs)} elements, derive_cluster_sizing wants {total}"
-        )
+        raise ValueError(f"total_idxs has {len(total_idxs)} elements, derive_cluster_sizing wants {total}")
 
     cursor = 0
     result: dict[str, list[int]] = {}

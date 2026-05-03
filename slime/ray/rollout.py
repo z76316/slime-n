@@ -5,6 +5,7 @@ import multiprocessing
 import os
 import random
 import time
+from argparse import Namespace
 from pathlib import Path
 from typing import Any
 
@@ -208,9 +209,7 @@ class ServerGroup:
             GPU_MEMORY_TYPE_CUDA_GRAPH,
         ]
         return [
-            engine.release_memory_occupation.remote(tags=all_tags)
-            for engine in self.engines
-            if engine is not None
+            engine.release_memory_occupation.remote(tags=all_tags) for engine in self.engines if engine is not None
         ]
 
     def onload(self, tags: list[str] | None = None):
@@ -425,7 +424,7 @@ class RolloutManager:
         # and single-arg `set_train_parallel_config` keep working unchanged).
         # Populated via `register_policy` from create_training_models_multi.
         self._policy_to_server: dict[str, str] = {}
-        self._policy_args: dict[str, "Namespace"] = {}
+        self._policy_args: dict[str, Namespace] = {}
         self._policy_train_parallel_config: dict[str, dict] = {}
 
     def _get_metrics_router_addr(self) -> str | None:
@@ -497,9 +496,7 @@ class RolloutManager:
         the first updatable one (legacy "first wins" path).
         """
         if name not in self.servers:
-            raise ValueError(
-                f"unknown sglang server {name!r}, known: {list(self.servers)}"
-            )
+            raise ValueError(f"unknown sglang server {name!r}, known: {list(self.servers)}")
         return self.servers[name]
 
     def register_policy(
@@ -882,10 +879,7 @@ class RolloutManager:
             return self.custom_reward_post_process_func(args, samples)
 
         raw_rewards = [sample.get_reward_value(args) for sample in samples]
-        if (
-            args.advantage_estimator in ["grpo", "gspo", "reinforce_plus_plus_baseline"]
-            and args.rewards_normalization
-        ):
+        if args.advantage_estimator in ["grpo", "gspo", "reinforce_plus_plus_baseline"] and args.rewards_normalization:
             # group norm — group by prompt (= rollout_batch_size groups, each of
             # size total // rollout_batch_size). This handles three cases with
             # one rule:
@@ -1277,7 +1271,9 @@ def start_rollout_servers(args, pg) -> dict[str, RolloutServer]:
 
         has_epd = model_cfg.has_encoder_disaggregation
 
-        def _make_group(group_cfg, router_ip, router_port, overrides_extra=None):
+        def _make_group(group_cfg, router_ip, router_port, overrides_extra=None, model_cfg=model_cfg):
+            # `model_cfg=model_cfg` binds the current loop iteration's value (avoids
+            # late-binding closure capture across the outer `for model_cfg in ...` loop).
             nonlocal engine_offset, gpu_offset
             gpus_per_engine = group_cfg.num_gpus_per_engine
             num_gpu_per_engine_local = min(gpus_per_engine, args.num_gpus_per_node)

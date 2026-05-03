@@ -303,9 +303,7 @@ def create_training_models_multi(args, pgs, rollout_manager, policy_configs):
             role=cfg.role,
         )
         handles[cfg.name] = PolicyHandle(config=cfg, args=args_p, train_group=train_group)
-        ray.get(
-            rollout_manager.register_policy.remote(cfg.name, cfg.sglang_server, args_p)
-        )
+        ray.get(rollout_manager.register_policy.remote(cfg.name, cfg.sglang_server, args_p))
 
     # ── async_init each + reconcile start_rollout_ids across policies ──
     # async_init kwargs mirror legacy create_training_models so OPD-megatron
@@ -317,14 +315,11 @@ def create_training_models_multi(args, pgs, rollout_manager, policy_configs):
                 h.args,
                 role=h.config.role,
                 with_ref=h.args.kl_coef != 0 or h.args.use_kl_loss,
-                with_opd_teacher=getattr(h.args, "use_opd", False)
-                and getattr(h.args, "opd_type", None) == "megatron",
+                with_opd_teacher=getattr(h.args, "use_opd", False) and getattr(h.args, "opd_type", None) == "megatron",
             )
         )
         if len(set(ids)) != 1:
-            raise RuntimeError(
-                f"{name}: workers disagree on start_rollout_id: {ids}"
-            )
+            raise RuntimeError(f"{name}: workers disagree on start_rollout_id: {ids}")
         starts[name] = ids[0]
         h.train_group.set_rollout_manager(rollout_manager)
 

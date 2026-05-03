@@ -49,18 +49,9 @@ from slime.ray.placement_group import (
     create_training_models_multi,
 )
 from slime.utils.arguments import parse_args
-from slime.utils.logging_utils import (
-    configure_logger,
-    finish_tracking,
-    init_tracking,
-    update_tracking_open_metrics,
-)
+from slime.utils.logging_utils import configure_logger, finish_tracking, init_tracking, update_tracking_open_metrics
 from slime.utils.misc import should_run_periodic_action
-from slime.utils.policy_config import (
-    build_sglang_config_from_policies,
-    derive_cluster_sizing,
-    parse_policy_configs,
-)
+from slime.utils.policy_config import build_sglang_config_from_policies, derive_cluster_sizing, parse_policy_configs
 
 logger = logging.getLogger(__name__)
 
@@ -91,10 +82,7 @@ def _set_multi_policy_global_defaults(args, policy_configs, actor_gpus: int, rol
     # All policies must agree on slice size in v1 — validates the cluster math.
     slice_sizes = {cfg.num_gpus_per_node for cfg in policy_configs}
     if len(slice_sizes) != 1:
-        raise ValueError(
-            "all policies must use the same num_gpus_per_node in v1; got "
-            f"{sorted(slice_sizes)}"
-        )
+        raise ValueError("all policies must use the same num_gpus_per_node in v1; got " f"{sorted(slice_sizes)}")
 
     args.rollout_num_gpus = rollout_gpus
     args.megatron_total_gpus = actor_gpus
@@ -145,14 +133,10 @@ def train(args):
             "(uses _get_updatable_server which assumes a single trainable server)"
         )
     if args.use_fault_tolerance and n_trainable > 1:
-        raise ValueError(
-            "--use-fault-tolerance not supported with multiple policies in v1"
-        )
+        raise ValueError("--use-fault-tolerance not supported with multiple policies in v1")
 
     # Derive cluster sizing from config and surface it on args for downstream code.
-    actor_gpus, rollout_gpus, total_gpus = derive_cluster_sizing(
-        policy_configs, colocate=args.colocate
-    )
+    actor_gpus, rollout_gpus, total_gpus = derive_cluster_sizing(policy_configs, colocate=args.colocate)
     _set_multi_policy_global_defaults(args, policy_configs, actor_gpus, rollout_gpus)
     logger.info(
         f"cluster sizing (colocate={args.colocate}): "
@@ -169,9 +153,7 @@ def train(args):
     # 3. Build a SglangConfig from per-policy sglang sub-blocks and start manager
     # ──────────────────────────────────────────────────────────────────────────
     sglang_config = build_sglang_config_from_policies(policy_configs)
-    rollout_manager, num_rollout_per_epoch = create_rollout_manager_multi(
-        args, pgs["rollout"], sglang_config
-    )
+    rollout_manager, num_rollout_per_epoch = create_rollout_manager_multi(args, pgs["rollout"], sglang_config)
 
     router_addr = ray.get(rollout_manager.get_metrics_router_addr.remote())
     update_tracking_open_metrics(args, router_addr)
@@ -202,11 +184,7 @@ def train(args):
     # 6. Train loop
     # ──────────────────────────────────────────────────────────────────────────
     for rollout_id in range(args.start_rollout_id, args.num_rollout):
-        if (
-            args.eval_interval is not None
-            and rollout_id == args.start_rollout_id
-            and not args.skip_eval_before_train
-        ):
+        if args.eval_interval is not None and rollout_id == args.start_rollout_id and not args.skip_eval_before_train:
             ray.get(rollout_manager.eval.remote(rollout_id))
 
         # Generate: returns dict[policy_name | "__shared__", list[batch_per_dp]]
@@ -226,14 +204,10 @@ def train(args):
             ray.get(h.train_group.async_train(rollout_id, data))
 
         # Save (per-policy checkpoint dirs from PolicyConfig.save)
-        if should_run_periodic_action(
-            rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout
-        ):
+        if should_run_periodic_action(rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout):
             for h in handles.values():
                 if h.config.save:
-                    h.train_group.save_model(
-                        rollout_id, force_sync=rollout_id == args.num_rollout - 1
-                    )
+                    h.train_group.save_model(rollout_id, force_sync=rollout_id == args.num_rollout - 1)
             if args.rollout_global_dataset:
                 ray.get(rollout_manager.save.remote(rollout_id))
 

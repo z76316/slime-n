@@ -21,9 +21,13 @@ import importlib.util
 import os
 import sys
 from argparse import Namespace
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
+
+if TYPE_CHECKING:
+    from slime.ray.rollout import RolloutManager
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
@@ -60,10 +64,11 @@ class _FakeServer:
         self.engine_gpu_offsets = engine_gpu_offsets or [0]
 
 
-def _make_manager(servers: dict[str, _FakeServer]) -> "RolloutManager":
+def _make_manager(servers: dict[str, _FakeServer]) -> RolloutManager:
     """Build a RolloutManager-shaped object with only the state the multi-policy
     methods touch. Skips Ray actor instantiation and __init__'s heavy setup."""
     from slime.ray.rollout import RolloutManager
+
     # __new__ on the underlying class (the .options(...).remote(...) factory wraps
     # the actual class; we want the raw Python class for in-process testing).
     cls = RolloutManager.__ray_actor_class__ if hasattr(RolloutManager, "__ray_actor_class__") else RolloutManager
@@ -179,9 +184,7 @@ class TestGetEnginesAndLock:
             ),
         }
         mgr = _make_manager(servers)
-        engines, lock, num_new, gpu_counts, gpu_offsets = mgr.get_engines_and_lock(
-            policy_name=None
-        )
+        engines, lock, num_new, gpu_counts, gpu_offsets = mgr.get_engines_and_lock(policy_name=None)
         # _get_updatable_server returns the first updatable → "solver"
         assert engines == ["e1"]
         assert num_new == 1

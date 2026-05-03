@@ -201,7 +201,7 @@ def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None 
     """
     samples = args.results_dict[role]
     if len(samples) >= target_count:
-        del samples[target_count:]   # also trim if somehow longer than expected
+        del samples[target_count:]  # also trim if somehow longer than expected
         return
     donor_pool = samples if samples else (args.results_dict.get(donor_role) or [])
     if not donor_pool:
@@ -289,7 +289,9 @@ async def run_agent_system(args, sample):
     # Group reward shaping: if the summarizer phase produced mostly correct
     # final answers, bonus both roles; otherwise penalize. Mean over ALL
     # summarizer samples since each one is a valid RM datapoint.
-    mean_summarizer_reward = sum(s.reward for s in args.results_dict["summarizer"]) / len(args.results_dict["summarizer"])
+    mean_summarizer_reward = sum(s.reward for s in args.results_dict["summarizer"]) / len(
+        args.results_dict["summarizer"]
+    )
     weight = args.correct_reward_weight if mean_summarizer_reward > 0.5 else args.incorrect_reward_weight
     reward_adjustment(args.results_dict["solver"], weight)
     reward_adjustment(args.results_dict["summarizer"], weight)
