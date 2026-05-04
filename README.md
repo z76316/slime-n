@@ -1,18 +1,22 @@
-# $$\huge\color{#1E293B}{\textsf{\textbf{slime}}}^{\color{#3B82F6}{\textsf{\textbf{N}}}}$$
+<div align="center">
+
+# $\huge\color{#1E293B}{\textsf{\textbf{slime}}}^{\color{#3B82F6}{\textsf{\textbf{n}}}}$
+
+</div>
 
 ## A Multi-Policy, Multi-Agent RL Training Framework
 
-$\text{slime}^{N}$ extends [slime](https://github.com/THUDM/slime) into a flexible RL training framework for multi-policy and multi-agent workloads. It can compose arbitrary combinations of trainable policy pairs, standalone trainable Megatron actors, and standalone frozen models.
+slime<sup>n</sup> extends [slime](https://github.com/THUDM/slime) into a flexible RL training framework for multi-policy and multi-agent workloads. It can compose arbitrary combinations of trainable policy pairs, standalone trainable Megatron actors, and standalone frozen models.
 
 - **Trainable policy pairs**: a Megatron training actor paired with an SGLang engine.
-- **Standalone trainable Megatron actors**: roles such as a PPO critic.
-- **Standalone frozen models**: Megatron teachers for OPD, or SGLang judges and verifiers.
+- **Standalone Megatron**: teacher model in OPD while using Megatron for teacher.
+- **Standalone SGLang**: SGLang judges and reward models.
 
 ![multi-policy architecture](./imgs/arch_2.png)
 
 ## Multi-policy
 
-- **`train_multi_policy.py`** — driver for N≥1 trainable policies. Replaces `train.py` for multi-policy runs.
+- **`train_multi_policy.py`** — driver for n≥1 trainable policies. Replaces `train.py` for multi-policy runs.
 - **YAML-driven configs** — `--config <path>.yaml`. Per-policy fields (parallelism, batching, optimizer, loss, paths, Megatron numerical / dropout, `log_probs_chunk_size`) live in the YAML; cluster sizing is derived from policies. See [`slime/utils/policy_config.py`](slime/utils/policy_config.py).
 - **Per-policy buffers (split mode)** — each policy trains on its own samples, tagged via `Sample.policy_name`.
 - **Per-policy weight sync** — serialized push from each Megatron actor to its paired sglang engine.
@@ -51,23 +55,15 @@ Code: [`examples/multi_policy_solver_summarizer`](examples/multi_policy_solver_s
 
 Trainable **student** generates rollouts; frozen **teacher** provides per-token logprobs that feed a KL term in the student's loss. Two backends for the teacher, both supported in the same schema:
 
-| variant | student | teacher | teacher slot |
-|---|---|---|---|
-| **Megatron-backend teacher** (recommended — kernel-consistent) | paired pipeline (`m✓ s✓ trainable`) | `m✓ s✗ trainable=false` | standalone Megatron actor |
-| **SGLang-backend teacher** (cheaper, kernel mismatch) | paired pipeline | `m✗ s✓ trainable=false` | standalone SGLang engine |
+| policy | megatron | sglang | trainable | role |
+|---|---|---|---|---|
+| `student` | ✓ | ✓ | ✓ | paired pipeline; generates rollouts |
+| `teacher` *(Megatron — recommended, kernel-consistent)* | ✓ | ✗ | ✗ | standalone actor; per-token logprobs |
+| `teacher` *(SGLang — cheaper, kernel mismatch)* | ✗ | ✓ | ✗ | standalone engine; per-token logprobs |
 
 Teacher is forward-only — `train()` returns `{"teacher_log_probs": ...}` as `external_data`, which is routed to the student through producer→consumer plumbing.
 
-See [`plan_opd.md`](../plan_opd.md) for the full design.
 
-### Other examples
-
-| Directory | Pattern |
-|---|---|
-| [`examples/multi_policy_two_agent`](examples/multi_policy_two_agent) | Solver + selector — two trainable paired policies. |
-| [`examples/multi_policy_multi_agent`](examples/multi_policy_multi_agent) | General multi-agent setup with N trainable policies. |
-
-Each example contains: `config.yaml`, `agent_system.py`, `prompts.py`, `rollout_with_multi_agents.py`, `run-*.sh`.
 
 ## Run
 
