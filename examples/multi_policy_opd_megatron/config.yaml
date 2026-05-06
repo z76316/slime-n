@@ -24,13 +24,6 @@
 #
 # Layout: GPU 0 = student Megatron, GPU 1 = teacher Megatron, GPU 2 = student SGLang.
 #
-# Limitations:
-#   - Same architecture for student and teacher (MODEL_ARGS is CLI-global).
-#     This config uses two Qwen3-0.6B checkpoints; the teacher is a different
-#     fine-tune of the same base.
-#   - TP / PP / CP must all be 1 on both policies (per-token alignment in
-#     the KL term assumes identical layouts).
-#
 # Each policy's per-policy fields (parallel, recompute, batching, optimizer,
 # loss, paths, Megatron numerical / dropout, log_probs_chunk_size) live in
 # this YAML. Run-level orchestration (rollout cadence, wandb) stays as CLI args.
