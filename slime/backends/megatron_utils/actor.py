@@ -97,6 +97,22 @@ class MegatronTrainRayActor(TrainRayActor):
                 self.sleep()
             return start_rollout_id
 
+        # Frozen producer (e.g. OPD Megatron teacher): same shape as critic —
+        # weights are loaded by initialize_model_and_optimizer above, but
+        # there is no train-side state to set up. Skip weights_backuper /
+        # weight_updater / load_other_checkpoint("ref"/"teacher") — the
+        # actor uses its primary weights for the forward-only train() path
+        # which delegates to the existing compute_log_prob. Keep the
+        # vocab_size fallback so bridge-mode loads (no --vocab-size in
+        # MODEL_ARGS) still work.
+        if not getattr(self.args, "trainable", True):
+            if self.args.vocab_size is None:
+                hf_vocab = getattr(self.hf_config, "vocab_size", None)
+                self.args.vocab_size = hf_vocab if hf_vocab is not None else self.tokenizer.vocab_size
+            if self.args.offload_train:
+                self.sleep()
+            return start_rollout_id
+
         self.weights_backuper = TensorBackuper.create(
             source_getter=lambda: named_params_and_buffers(
                 self.args,
@@ -367,7 +383,22 @@ class MegatronTrainRayActor(TrainRayActor):
         with timer("data_preprocess"):
             rollout_data = self._get_rollout_data(rollout_data_ref)
 
-        if self.role == "critic":
+        if not getattr(self.args, "trainable", True):
+            # Frozen producer (e.g. OPD Megatron teacher): forward-only via
+            # the existing compute_log_prob path on the actor's primary
+            # weights. Returns the dict for the multi-policy driver to
+            # route into trainable consumers' external_data. No backward,
+            # no advantage compute, no save. Returns {} on non-last PP
+            # ranks; Ray's actor-group return aggregation handles the
+            # rank-0 gather. Honors args.log_probs_chunk_size automatically.
+            from slime.backends.megatron_utils.data import tensors_to_cpu
+
+            data_iterator, num_microbatches = get_data_iterator(self.args, self.model, rollout_data)
+            out = self.compute_log_prob(data_iterator, num_microbatches, store_prefix="teacher_")
+            result = (
+                {"teacher_log_probs": tensors_to_cpu(out["teacher_log_probs"])} if "teacher_log_probs" in out else {}
+            )
+        elif self.role == "critic":
             result = self.train_critic(rollout_id, rollout_data)
         else:
             self.train_actor(rollout_id, rollout_data, external_data=external_data)
@@ -461,6 +492,19 @@ class MegatronTrainRayActor(TrainRayActor):
                             from slime.backends.megatron_utils.data import tensors_to_gpu
 
                             rollout_data["values"] = tensors_to_gpu(values)
+
+                # Multi-policy OPD: teacher_log_probs arrive via external_data
+                # from a frozen Megatron producer (opd_type=megatron_actor).
+                # Mirror the values merge above so apply_opd_kl_to_advantages
+                # — invoked from compute_advantages_and_returns below — finds
+                # rollout_data["teacher_log_probs"] populated.
+                if external_data is not None and mpu.is_pipeline_last_stage():
+                    teacher_log_probs = external_data.get("teacher_log_probs")
+                    if teacher_log_probs is not None:
+                        from slime.backends.megatron_utils.data import tensors_to_gpu
+
+                        rollout_data["teacher_log_probs"] = tensors_to_gpu(teacher_log_probs)
+
                 if self._active_model_tag != "actor":
                     self._switch_model("actor")
 
@@ -544,6 +588,12 @@ class MegatronTrainRayActor(TrainRayActor):
     @timer
     def update_weights(self) -> None:
         if self.args.debug_train_only or self.args.debug_rollout_only:
+            return
+
+        # Frozen producers have no paired sglang engine and no weight_updater
+        # (skipped at init). Defense in depth — train_multi_policy.py also
+        # gates its push loops on cfg.trainable.
+        if not getattr(self.args, "trainable", True):
             return
 
         if self.args.use_fault_tolerance:

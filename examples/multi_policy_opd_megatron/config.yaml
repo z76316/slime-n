@@ -1,0 +1,155 @@
+# OPD multi-policy config — student (paired) + frozen Megatron teacher.
+#
+# Pattern: trainable student paired with its own SGLang engine, plus a
+# standalone frozen Megatron teacher that runs forward-only and feeds
+# teacher_log_probs to the student via external_data.
+#
+#   student              (m✓ s✓ trainable=true)   paired pipeline; generates rollouts
+#   teacher_megatron     (m✓ s✗ trainable=false)  standalone actor; per-token logprobs
+#
+# Data path:
+#   teacher.train()  ──→  {"teacher_log_probs": ...}
+#                            │
+#                            ▼ external_data
+#   student.train_actor  merges into rollout_data["teacher_log_probs"]
+#                            │
+#                            ▼
+#   compute_advantages_and_returns → reverse-KL applied to advantages
+#
+# Cluster sizing (no --colocate):
+#   actor_gpus   = sum(megatron_num_nodes * num_gpus_per_node) = 2 × 1 × 1 = 2
+#   rollout_gpus = sum(sglang_num_nodes   * num_gpus_per_node) = 1 × 1 × 1 = 1
+#                  (teacher has no engine; sglang_num_nodes = 0)
+#   total        = actor_gpus + rollout_gpus                   = 3
+#
+# Layout: GPU 0 = student Megatron, GPU 1 = teacher Megatron, GPU 2 = student SGLang.
+#
+# Limitations:
+#   - Same architecture for student and teacher (MODEL_ARGS is CLI-global).
+#     This config uses two Qwen3-0.6B checkpoints; the teacher is a different
+#     fine-tune of the same base.
+#   - TP / PP / CP must all be 1 on both policies (per-token alignment in
+#     the KL term assumes identical layouts).
+#
+# Each policy's per-policy fields (parallel, recompute, batching, optimizer,
+# loss, paths, Megatron numerical / dropout, log_probs_chunk_size) live in
+# this YAML. Run-level orchestration (rollout cadence, wandb) stays as CLI args.
+
+policies:
+
+  # ─── student — trainable, paired pipeline ────────────────────────────────
+  - name: student
+    role: actor
+
+    trainable: true
+
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_opd_megatron/qwen3-0.6b/student
+    # ref_load: /ckpt/qwen3-0.6b-torch-dist  # uncomment to resume from torch_dist
+
+    buffer_mode: split
+
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+
+    megatron:
+      megatron_to_hf_mode: bridge
+      tensor_model_parallel_size: 1
+      pipeline_model_parallel_size: 1
+      context_parallel_size: 1
+      expert_model_parallel_size: 1
+      expert_tensor_parallel_size: 1
+
+      recompute_granularity: full
+      recompute_method: uniform
+      recompute_num_layers: 1
+
+      # RL-correctness defaults (zero dropout, fp32 reductions/softmax)
+      attention_dropout: 0.0
+      hidden_dropout: 0.0
+      accumulate_allreduce_grads_in_fp32: true
+      attention_softmax_in_fp32: true
+
+      log_probs_chunk_size: 512
+
+      micro_batch_size: 1
+      global_batch_size: 64
+      use_dynamic_batch_size: true
+      max_tokens_per_gpu: 8192
+
+      optimizer: adam
+      lr: 1.0e-6
+      lr_decay_style: constant
+      weight_decay: 0.1
+      adam_beta1: 0.9
+      adam_beta2: 0.98
+      optimizer_cpu_offload: true
+      overlap_cpu_optimizer_d2h_h2d: true
+      use_precision_aware_optimizer: true
+
+      advantage_estimator: grpo
+      n_samples_per_prompt: 4
+      eps_clip: 0.2
+      eps_clip_high: 0.28
+      kl_coef: 0
+      use_kl_loss: false
+      kl_loss_coef: 0
+
+      # OPD configuration: consume teacher_log_probs from external_data fed by
+      # the standalone teacher_megatron actor.
+      use_opd: true
+      opd_type: megatron_actor
+      opd_kl_coef: 1.0
+
+    sglang:
+      update_weights: true
+      num_gpus_per_engine: 1
+
+      mem_fraction_static: 0.85
+      cuda_graph_bs: [1, 2, 4, 8, 16, 32]
+      chunked_prefill_size: 4096
+      max_running_requests: 32
+      max_total_tokens: 131072
+      log_level: info
+
+      server_groups:
+        - worker_type: regular
+          num_gpus: 1
+
+  # ─── teacher_megatron — frozen, standalone Megatron ──────────────────────
+  - name: teacher_megatron
+    role: actor
+
+    trainable: false
+
+    hf_checkpoint: /root/Qwen3-0.6B-teacher
+    # No save — frozen actor, never writes a checkpoint.
+
+    buffer_mode: split
+
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 0  # no engine
+
+    megatron:
+      megatron_to_hf_mode: bridge
+      tensor_model_parallel_size: 1
+      pipeline_model_parallel_size: 1
+      context_parallel_size: 1
+      expert_model_parallel_size: 1
+      expert_tensor_parallel_size: 1
+
+      recompute_granularity: full
+      recompute_method: uniform
+      recompute_num_layers: 1
+
+      attention_dropout: 0.0
+      hidden_dropout: 0.0
+      accumulate_allreduce_grads_in_fp32: true
+      attention_softmax_in_fp32: true
+
+      log_probs_chunk_size: 512
+
+      # Optimizer fields keep dataclass defaults — train() runs the
+      # forward-only path on this actor, so no backward pass fires.

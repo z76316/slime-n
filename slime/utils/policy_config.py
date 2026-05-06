@@ -120,6 +120,22 @@ class PolicyConfig:
     # ── Multi-policy orchestration ──
     sglang_server: str | None = None  # 1:1 pairing; defaults to PolicyConfig.name
     buffer_mode: str = "split"  # "split" | "shared"
+    # trainable=False marks a frozen producer (e.g., OPD Megatron teacher):
+    # the train loop runs its forward-only train() and merges the returned
+    # dict into trainable consumers' external_data. Frozen actors skip
+    # weights_backuper / weight_updater / optimizer-state save / weight push.
+    trainable: bool = True
+
+    # ── On-policy distillation (per-policy; legacy was CLI-global) ──
+    # use_opd / opd_type / opd_kl_coef live on the trainable consumer (the
+    # student). For the new external-data path, set opd_type="megatron_actor"
+    # — this skips the legacy in-process tag teacher path at
+    # placement_group.py:159 (which fires only when opd_type == "megatron").
+    # opd_teacher_load is kept for the legacy in-process path only.
+    use_opd: bool = False
+    opd_type: str | None = None
+    opd_kl_coef: float = 1.0
+    opd_teacher_load: str | None = None
 
     # ── GPU placement (cluster-level num_gpus_per_node, per-side node counts) ──
     num_gpus_per_node: int = 8
@@ -142,8 +158,10 @@ def validate_policy_config(cfg: PolicyConfig) -> None:
     if not cfg.hf_checkpoint:
         raise ValueError(f"{cfg.name}: hf_checkpoint required")
 
-    # Sglang placement consistency
-    if cfg.sglang is not None:
+    # Sglang placement consistency. Frozen producers (e.g. OPD Megatron
+    # teacher) don't run an engine; their sglang sub-block / sglang_num_nodes
+    # are unused, so don't apply the placement check.
+    if cfg.sglang is not None and cfg.trainable:
         sglang_total = cfg.sglang_num_nodes * cfg.num_gpus_per_node
         groups_total = sum(g["num_gpus"] for g in cfg.sglang.get("server_groups", []))
         if sglang_total != groups_total:
@@ -174,6 +192,7 @@ def parse_policy_configs(config_path: str) -> list[PolicyConfig]:
         flat: dict[str, Any] = {
             "name": entry["name"],
             "role": entry.get("role", "actor"),
+            "trainable": entry.get("trainable", True),
             "hf_checkpoint": entry.get("hf_checkpoint", ""),
             "load": entry.get("load"),
             "save": entry.get("save"),
@@ -243,6 +262,9 @@ def build_sglang_config_from_policies(configs: list[PolicyConfig]):
 
     models = []
     for cfg in configs:
+        # Frozen producers (e.g. OPD Megatron teacher) have no engine.
+        if not cfg.trainable:
+            continue
         if cfg.sglang is None:
             raise ValueError(f"{cfg.name}: missing 'sglang' sub-block in config")
         sg = dict(cfg.sglang)
@@ -277,7 +299,9 @@ def derive_cluster_sizing(configs: list[PolicyConfig], colocate: bool) -> tuple[
       - create_placement_groups_multi (to size the global PG)
     """
     actor_gpus = sum(c.megatron_num_nodes * c.num_gpus_per_node for c in configs)
-    rollout_gpus = sum(c.sglang_num_nodes * c.num_gpus_per_node for c in configs)
+    # Frozen producers don't run an sglang engine, so they don't contribute
+    # to the rollout-side GPU budget.
+    rollout_gpus = sum(c.sglang_num_nodes * c.num_gpus_per_node for c in configs if c.trainable)
     total_gpus = max(actor_gpus, rollout_gpus) if colocate else actor_gpus + rollout_gpus
     return actor_gpus, rollout_gpus, total_gpus
 
