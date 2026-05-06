@@ -1,42 +1,3 @@
-"""Multi-policy slime driver.
-
-Replaces train.py for runs with N>1 trainable Megatron actors. Each actor is
-paired 1:1 with its own sglang engine. Per-policy buffers (split mode), per-policy
-weight sync (serialized), per-policy checkpointing.
-
-YAML entry point: --config <path>.yaml. See examples/multi_policy_multi_agent/config.yaml.
-
-Architecture (also in plan.md):
-
-                          ┌──────────────────────┐
-                          │   RolloutManager     │  data source, rollout-fn dispatch,
-                          │   (1 Ray actor)      │  per-policy buffer + reward post-process
-                          └──────────┬───────────┘
-                                     │ invokes rollout fn (which posts HTTP to engines below)
-                         ┌───────────┼───────────────────────┐
-                   ┌─────▼─────┐ ┌───▼───────┐ ┌─────────────▼─────┐
-                   │  sglang   │ │  sglang   │ │      sglang       │
-                   │  engine A │ │  engine B │ │      engine C     │
-                   └─────▲─────┘ └───▲───────┘ └─────────────▲─────┘
-                         │ weight    │ weight                │ weight
-                         │ push      │ push                  │ push
-                   ┌─────┴─────┐ ┌───┴───────┐ ┌─────────────┴─────┐
-                   │ actor A   │ │ actor B   │ │     actor C       │
-                   │ RayTrain  │ │ RayTrain  │ │     RayTrain      │
-                   │  Group    │ │  Group    │ │      Group        │
-                   └───────────┘ └───────────┘ └───────────────────┘
-
-Runtime dependencies (Steps 1, 2, 4, 5, 7 in plan.md must land before this runs):
-  - slime/utils/types.py:           Sample.policy_name field (Step 1)
-  - slime/ray/rollout.py:           _split_by_policy + _post_process_rewards(samples, policy_args)  (Step 2)
-                                    _get_server(name) + register_policy(...) +
-                                    get_engines_and_lock(policy_name=...)                  (Step 4)
-                                    create_rollout_manager_multi(args, pg, sglang_config)  (this file)
-  - slime/backends/megatron_utils/actor.py:
-                                    update_weights reads args.policy_name                  (Step 5)
-  - slime/ray/placement_group.py:   create_placement_groups_multi(args, policy_configs)    (Step 7)
-"""
-
 from __future__ import annotations
 
 import logging
@@ -56,30 +17,31 @@ from slime.utils.policy_config import build_sglang_config_from_policies, derive_
 logger = logging.getLogger(__name__)
 
 
+# Multi-policy slime driver. Each policy in --config <path>.yaml gets its own
+# Megatron actor paired 1:1 with an SGLang engine; frozen policies (e.g. OPD
+# teachers) skip the engine and run forward-only, feeding external_data to
+# trainable consumers. Replaces train.py for runs with N>=1 trainable actors.
 def _set_multi_policy_global_defaults(args, policy_configs, actor_gpus: int, rollout_gpus: int) -> None:
     """Populate legacy global args that shared rollout code still reads.
 
-    Per-policy Megatron actors get their own namespaces later (each cfg projected
-    via config_to_namespace). The values written here are for the single
-    RolloutManager + sglang engine setup, which is *cluster-level*: the physical
-    GPUs-per-node from --num-gpus-per-node MUST be preserved here, not the
-    per-policy slice size from cfg.num_gpus_per_node (those are different
-    concepts despite the unfortunate name overlap).
+    Per-policy actors get their own namespaces later (config_to_namespace).
+    The values written here are cluster-level: --num-gpus-per-node MUST stay
+    as physical GPUs-per-node, not the per-policy slice size from
+    cfg.num_gpus_per_node (different concepts despite the name overlap).
     """
     if not policy_configs:
         raise ValueError("multi-policy config must contain at least one policy")
 
     if args.hf_checkpoint is None:
         args.hf_checkpoint = policy_configs[0].hf_checkpoint
-    # _set_default_megatron_args (run at parse_args time) tried to fall back
-    # tokenizer_model to hf_checkpoint, but hf_checkpoint was still None then,
-    # so tokenizer_model got pinned to None. Re-derive now that we know it.
+    # tokenizer_model fell back to None when hf_checkpoint was None at parse_args
+    # time. Re-derive now that we know it.
     if getattr(args, "tokenizer_model", None) is None:
         args.tokenizer_model = args.hf_checkpoint
         if not getattr(args, "tokenizer_type", None):
             args.tokenizer_type = "HuggingFaceTokenizer"
 
-    # All policies must agree on slice size in v1 — validates the cluster math.
+    # All policies must agree on slice size in v1.
     slice_sizes = {cfg.num_gpus_per_node for cfg in policy_configs}
     if len(slice_sizes) != 1:
         raise ValueError("all policies must use the same num_gpus_per_node in v1; got " f"{sorted(slice_sizes)}")
@@ -106,11 +68,10 @@ def _set_multi_policy_global_defaults(args, policy_configs, actor_gpus: int, rol
             f"that divides actor_gpus, or adjust the per-policy num_gpus_per_node."
         )
 
-    # Manager reads global args.n_samples_per_prompt / args.global_batch_size for
-    # legacy single-buffer code paths (e.g. group-norm reshape fast path). With
-    # multi-policy split-buffer the per-policy args is what actually drives those,
-    # but keeping the manager-global consistent prevents silent CLI/config drift
-    # if users forget to add the corresponding --flag in the launcher.
+    # Manager reads global args.n_samples_per_prompt / args.global_batch_size
+    # for legacy single-buffer code paths. Multi-policy actually drives those
+    # from the per-policy args, but mirroring the first policy here prevents
+    # silent CLI/config drift.
     args.n_samples_per_prompt = policy_configs[0].n_samples_per_prompt
     args.global_batch_size = policy_configs[0].global_batch_size
 
@@ -118,14 +79,11 @@ def _set_multi_policy_global_defaults(args, policy_configs, actor_gpus: int, rol
 def train(args):
     configure_logger()
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # 1. Parse the YAML config and validate v1 restrictions
-    # ──────────────────────────────────────────────────────────────────────────
+    # parse the YAML config and validate v1 restrictions
     if not getattr(args, "config", None):
         raise ValueError("train_multi_policy.py requires --config <path>.yaml")
-
     policy_configs = parse_policy_configs(args.config)
-    n_trainable = len(policy_configs)
+    n_trainable = sum(1 for cfg in policy_configs if cfg.trainable)
 
     if args.check_weight_update_equal and n_trainable > 1:
         raise ValueError(
@@ -135,7 +93,7 @@ def train(args):
     if args.use_fault_tolerance and n_trainable > 1:
         raise ValueError("--use-fault-tolerance not supported with multiple policies in v1")
 
-    # Derive cluster sizing from config and surface it on args for downstream code.
+    # derive cluster sizing and surface it on args for downstream code
     actor_gpus, rollout_gpus, total_gpus = derive_cluster_sizing(policy_configs, colocate=args.colocate)
     _set_multi_policy_global_defaults(args, policy_configs, actor_gpus, rollout_gpus)
     logger.info(
@@ -143,67 +101,87 @@ def train(args):
         f"actor_gpus={actor_gpus}, rollout_gpus={rollout_gpus}, total={total_gpus}"
     )
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # 2. Allocate placement groups: per-policy actor slices + rollout slice
-    # ──────────────────────────────────────────────────────────────────────────
+    # allocate per-policy actor slices + a rollout slice
     pgs = create_placement_groups_multi(args, policy_configs)
     init_tracking(args)
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # 3. Build a SglangConfig from per-policy sglang sub-blocks and start manager
-    # ──────────────────────────────────────────────────────────────────────────
+    # build the SglangConfig from per-policy sglang sub-blocks and start the manager
     sglang_config = build_sglang_config_from_policies(policy_configs)
     rollout_manager, num_rollout_per_epoch = create_rollout_manager_multi(args, pgs["rollout"], sglang_config)
 
+    # Update primary W&B with SGLang metrics endpoint now that servers are up.
     router_addr = ray.get(rollout_manager.get_metrics_router_addr.remote())
     update_tracking_open_metrics(args, router_addr)
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # 4. Build the N RayTrainGroups, register each with the manager, async_init,
-    #    and reconcile start_rollout_ids across policies. Returns a dict of
-    #    PolicyHandles keyed by policy name. Mirrors create_training_models for
-    #    the multi-policy path.
-    # ──────────────────────────────────────────────────────────────────────────
+    # build N RayTrainGroups, register each with the manager, async_init, and
+    # reconcile start_rollout_ids across policies. Returns dict[name, PolicyHandle].
     handles = create_training_models_multi(args, pgs, rollout_manager, policy_configs)
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # 5. Initial weight push (each actor → its paired engine)
-    # ──────────────────────────────────────────────────────────────────────────
+    # Always push trainable actor weights to rollout once weights are loaded.
+    # Frozen producers have no paired engine; skip.
     if args.offload_rollout:
         ray.get(rollout_manager.onload_weights.remote())
     for h in handles.values():
-        h.train_group.update_weights()
+        if h.config.trainable:
+            h.train_group.update_weights()
     if args.offload_rollout:
         ray.get(rollout_manager.onload_kv.remote())
 
-    # Eval-only path (no training rollouts)
+    # eval-only path (no training rollouts)
     if args.num_rollout == 0 and args.eval_interval is not None:
         ray.get(rollout_manager.eval.remote(rollout_id=0))
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # 6. Train loop
-    # ──────────────────────────────────────────────────────────────────────────
+    # train loop
     for rollout_id in range(args.start_rollout_id, args.num_rollout):
         if args.eval_interval is not None and rollout_id == args.start_rollout_id and not args.skip_eval_before_train:
             ray.get(rollout_manager.eval.remote(rollout_id))
 
-        # Generate: returns dict[policy_name | "__shared__", list[batch_per_dp]]
+        # generate: returns dict[policy_name | "__shared__", list[batch_per_dp]]
         rollout_data = ray.get(rollout_manager.generate.remote(rollout_id))
 
         if args.offload_rollout:
             ray.get(rollout_manager.offload.remote())
 
-        # Train each policy independently — no DAG, no external_data (PPO out of scope).
-        # Wait for each to finish before starting the next; concurrent train across
-        # policies that share GPU slots would conflict.
-        for h in handles.values():
+        # Train in two passes. Frozen producers (e.g. OPD Megatron teacher)
+        # run forward-only first on the trainable policy's rollout data;
+        # their returned dicts merge into a single external_data passed to
+        # all trainable consumers. With no frozen producers this collapses
+        # to a single-pass loop with external_data=None — bit-identical to
+        # pre-multi-producer behavior.
+        trainable_handles = [h for h in handles.values() if h.config.trainable]
+        frozen_handles = [h for h in handles.values() if not h.config.trainable]
+
+        # frozen producers first; seed from the first trainable's rollout data
+        producer_outputs: dict[str, dict] = {}
+        if frozen_handles:
+            seed_name = trainable_handles[0].config.name
+            seed_data = rollout_data.get(seed_name) or rollout_data.get("__shared__")
+            if seed_data is None:
+                logger.warning(
+                    f"frozen producers got no rollout data; skipping {[h.config.name for h in frozen_handles]}"
+                )
+            else:
+                for h in frozen_handles:
+                    producer_outputs[h.config.name] = ray.get(
+                        h.train_group.async_train(rollout_id, seed_data, external_data=None)
+                    )
+
+        # merge producer outputs (last-write-wins on key collision); pass None when empty
+        merged_external: dict = {}
+        for out in producer_outputs.values():
+            if out:
+                merged_external.update(out)
+        external_for_trainable = merged_external if merged_external else None
+
+        # trainable consumers; serialized so policies sharing GPU slots don't conflict
+        for h in trainable_handles:
             data = rollout_data.get(h.config.name) or rollout_data.get("__shared__")
             if data is None:
                 logger.warning(f"policy {h.config.name} got no rollout data")
                 continue
-            ray.get(h.train_group.async_train(rollout_id, data))
+            ray.get(h.train_group.async_train(rollout_id, data, external_data=external_for_trainable))
 
-        # Save (per-policy checkpoint dirs from PolicyConfig.save)
+        # save per-policy checkpoints (skipped when h.config.save is unset, as for frozen producers)
         if should_run_periodic_action(rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout):
             for h in handles.values():
                 if h.config.save:
@@ -211,27 +189,25 @@ def train(args):
             if args.rollout_global_dataset:
                 ray.get(rollout_manager.save.remote(rollout_id))
 
-        # Memory hygiene
+        # memory hygiene
         if not args.offload_train:
             for h in handles.values():
                 h.train_group.clear_memory()
 
-        # Weight update (serialized — sglang engines on shared GPUs cannot accept
-        # two simultaneous broadcasts).
+        # weight update — serialized; sglang engines on shared GPUs cannot accept
+        # two simultaneous broadcasts. Frozen producers have no engine; skip.
         if args.offload_rollout:
             ray.get(rollout_manager.onload_weights.remote())
         for h in handles.values():
-            h.train_group.update_weights()
+            if h.config.trainable:
+                h.train_group.update_weights()
         if args.offload_rollout:
             ray.get(rollout_manager.onload_kv.remote())
 
-        # Eval (routes through one trainable policy by convention)
+        # eval (routes through one trainable policy by convention)
         if should_run_periodic_action(rollout_id, args.eval_interval, num_rollout_per_epoch):
             ray.get(rollout_manager.eval.remote(rollout_id))
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # 7. Teardown
-    # ──────────────────────────────────────────────────────────────────────────
     ray.get(rollout_manager.dispose.remote())
     finish_tracking(args)
 
