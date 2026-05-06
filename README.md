@@ -9,7 +9,7 @@
 slime<sup>n</sup> extends [slime](https://github.com/THUDM/slime) into a flexible RL training framework for multi-policy and multi-agent workloads. A run is composed of any mix of three policy shapes:
 
 - **Trainable policy pair** — a Megatron training actor paired 1:1 with an SGLang engine. The default workhorse for RL.
-- **Standalone Megatron actor (frozen)** — Megatron only, no engine; runs forward-only and emits per-token logprobs (e.g. an OPD teacher).
+- **Standalone Megatron actor** — Megatron only, no SGLang engine. Trainable variant trains its own loss without rolling out (e.g. a PPO critic); frozen variant runs forward-only and emits per-token logprobs (e.g. an OPD teacher).
 - **Standalone SGLang engine (frozen)** — SGLang only, no trainer; serves inference for judges, reward models, or verifier-style scoring.
 
 ![multi-policy architecture](./imgs/arch_2.png)
