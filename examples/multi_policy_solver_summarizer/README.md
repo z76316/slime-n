@@ -31,3 +31,13 @@ bash examples/multi_policy_solver_summarizer/run-qwen3-0.6B-solver-summarizer.sh
 | `summarizer` | ✓ | ✓ | ✓ | synthesizes final answer from N candidates |
 
 Cluster: 4 GPUs (2 megatron + 2 sglang, no colocate).
+
+## Results
+
+1873-step run on Qwen3-0.6B.
+
+**Per-role raw reward** — both policies trend up; summarizer mean
+~0.54, solver mean ~0.43. The summarizer benefits from seeing all N
+solver candidates so its peak (~0.78) exceeds the solver's (~0.65).
+
+![reward](imgs/reward.png)

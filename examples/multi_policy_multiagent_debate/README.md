@@ -35,3 +35,18 @@ bash examples/multi_policy_multiagent_debate/run-qwen3-0.6B-multiagent-debate.sh
 | `critic` | ✓ | ✓ | ✓ | round-1+ answer updater |
 
 Cluster: 4 GPUs (2 megatron + 2 sglang, no colocate).
+
+## Results
+
+1062-step run on Qwen3-0.6B.
+
+**Per-role raw reward** — both policies trend up as agents converge.
+The critic's reward is consistently higher (mean ~0.74, max ~0.93)
+because trajectory-level scoring credits every critic round when the
+agent's FINAL response matches the majority vote ŷ; the generator
+only gets reward on its single round-0 boxed answer (mean ~0.27,
+max ~0.44). The visible inflection around step 450 — critic jumps
+~0.6 → ~0.85 — is the moment agents stably converge to a shared
+answer in the late critic rounds.
+
+![reward](imgs/reward.png)
