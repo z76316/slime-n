@@ -1,0 +1,171 @@
+# OPD multi-policy config — student (paired) + frozen SGLang teacher.
+#
+# Pattern: trainable student paired with its own SGLang engine, plus a
+# standalone frozen SGLang engine serving the teacher. Teacher's per-token
+# logprobs are fetched at rollout time (via the SGLang server's logprobs
+# return) and stored on Sample.teacher_log_probs; the student consumes
+# them via the legacy single-policy SGLang-OPD path.
+#
+#   student              (m✓ s✓ trainable=true)   paired pipeline; generates rollouts
+#   teacher_sglang       (m✗ s✓ trainable=false)  standalone engine; per-token logprobs
+#
+# Data path:
+#   rollout: student.SGLang generates response → custom rollout fn calls
+#            teacher_sglang's /generate with return_logprobs=True on the
+#            response tokens → sets sample.teacher_log_probs
+#                            │
+#                            ▼ via _convert_samples_to_train_data:
+#                              train_data["teacher_log_probs"] = [s.teacher_log_probs ...]
+#                            │
+#                            ▼ student's train_actor reads rollout_data["teacher_log_probs"]
+#   compute_advantages_and_returns → apply_opd_kl_to_advantages reverse-KL
+#
+# Compared to multi_policy_opd_megatron:
+#   - Cheaper to deploy (SGLang inference vs Megatron training-time forward).
+#   - Higher KL noise floor — sglang inference kernels and Megatron training
+#     kernels disagree even on identical weights (see train_rollout_logprob_abs_diff).
+#     For OPD's cross-model KL, this is permanent noise that fights the actual signal.
+#     Use multi_policy_opd_megatron when kernel consistency matters.
+#
+# Cluster sizing (no --colocate):
+#   actor_gpus   = sum(megatron_num_nodes * num_gpus_per_node) = 1 × 1 = 1
+#                  (only student has a Megatron actor; teacher.megatron_num_nodes=0)
+#   rollout_gpus = sum(sglang_num_nodes   * num_gpus_per_node) = 2 × 1 × 1 = 2
+#                  (student + teacher each host an SGLang engine)
+#   total        = actor_gpus + rollout_gpus                   = 3
+#
+# Layout: GPU 0 = student Megatron, GPU 1 = student SGLang, GPU 2 = teacher SGLang.
+#
+# FRAMEWORK DEPENDENCIES (must land before this config runs end-to-end):
+#   - F1: derive_cluster_sizing's rollout_gpus filter must use "hosts an
+#     engine" predicate, not cfg.trainable. Otherwise frozen teacher's
+#     sglang_num_nodes contribution is excluded → cluster underallocates.
+#   - F2: build_sglang_config_from_policies must include policies with
+#     server_groups (not gated only on cfg.trainable). Otherwise the
+#     teacher's engine never spawns.
+#   - F3: rollout.py:_policy_relative_engine_gpu_offsets asserts engine
+#     GPUs within actor slice. For m✗ s✓ judge with actor_gpus=0 the
+#     assertion fires; needs an early-return for non-Megatron policies.
+#   - Custom rollout function (see rollout_with_teacher_sglang.py spec
+#     in this directory) that queries teacher_sglang for logprobs and
+#     stamps Sample.teacher_log_probs.
+# All four are tracked in plan_colocate.md (F1, F2, F3) and discussed
+# in this directory's README.
+
+policies:
+
+  # ─── student — trainable, paired pipeline ────────────────────────────────
+  - name: student
+    role: actor
+
+    trainable: true
+
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_opd_sglang/qwen3-0.6b/student
+
+    buffer_mode: split
+
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+
+    megatron:
+      megatron_to_hf_mode: bridge
+      tensor_model_parallel_size: 1
+      pipeline_model_parallel_size: 1
+      context_parallel_size: 1
+      expert_model_parallel_size: 1
+      expert_tensor_parallel_size: 1
+
+      recompute_granularity: full
+      recompute_method: uniform
+      recompute_num_layers: 1
+
+      # RL-correctness defaults
+      attention_dropout: 0.0
+      hidden_dropout: 0.0
+      accumulate_allreduce_grads_in_fp32: true
+      attention_softmax_in_fp32: true
+
+      log_probs_chunk_size: 512
+
+      micro_batch_size: 1
+      global_batch_size: 64
+      use_dynamic_batch_size: true
+      max_tokens_per_gpu: 8192
+
+      optimizer: adam
+      lr: 1.0e-6
+      lr_decay_style: constant
+      weight_decay: 0.1
+      adam_beta1: 0.9
+      adam_beta2: 0.98
+      optimizer_cpu_offload: true
+      overlap_cpu_optimizer_d2h_h2d: true
+      use_precision_aware_optimizer: true
+
+      advantage_estimator: grpo
+      n_samples_per_prompt: 4
+      eps_clip: 0.2
+      eps_clip_high: 0.28
+      kl_coef: 0
+      use_kl_loss: false
+      kl_loss_coef: 0
+
+      # OPD configuration: teacher's logprobs arrive on Sample.teacher_log_probs
+      # (set by the rollout function), routed through _convert_samples_to_train_data
+      # → rollout_data["teacher_log_probs"] → apply_opd_kl_to_advantages.
+      use_opd: true
+      opd_type: sglang
+      opd_kl_coef: 1.0
+      # opd_teacher_load: NOT SET — sglang teacher doesn't load weights into
+      # Megatron; legacy validator at arguments.py:1654-1657 also asserts
+      # opd_teacher_load is None when opd_type=sglang.
+
+    sglang:
+      update_weights: true
+      num_gpus_per_engine: 1
+
+      mem_fraction_static: 0.85
+      cuda_graph_bs: [1, 2, 4, 8, 16, 32]
+      chunked_prefill_size: 4096
+      max_running_requests: 32
+      max_total_tokens: 131072
+      log_level: info
+
+      server_groups:
+        - worker_type: regular
+          num_gpus: 1
+
+  # ─── teacher_sglang — frozen, standalone SGLang engine ───────────────────
+  - name: teacher_sglang
+    role: actor
+
+    trainable: false
+
+    hf_checkpoint: /root/Qwen3-0.6B-teacher  # any model with same tokenizer / vocab
+    # No save — frozen actor.
+
+    buffer_mode: split
+
+    num_gpus_per_node: 1
+    megatron_num_nodes: 0  # no Megatron actor for this policy
+    sglang_num_nodes: 1
+
+    # No megatron block — teacher has no Megatron actor; framework should
+    # skip Megatron-side init entirely for this policy.
+
+    sglang:
+      update_weights: false  # frozen weights — never push updates to this engine
+      num_gpus_per_engine: 1
+
+      mem_fraction_static: 0.85
+      cuda_graph_bs: [1, 2, 4, 8, 16, 32]
+      chunked_prefill_size: 4096
+      max_running_requests: 32
+      max_total_tokens: 131072
+      log_level: info
+
+      server_groups:
+        - worker_type: regular
+          num_gpus: 1
