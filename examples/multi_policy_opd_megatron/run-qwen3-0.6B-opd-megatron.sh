@@ -87,9 +87,9 @@ EVAL_ARGS=(
 )
 
 WANDB_ARGS=(
-   #--use-wandb
-   # --wandb-project slime-dev
-   # --wandb-group qwen3-0.6B-opd-megatron
+   --use-wandb
+   --wandb-project slime-dev
+   --wandb-group qwen3-0.6B-opd-megatron
 )
 
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}

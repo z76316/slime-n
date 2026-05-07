@@ -162,9 +162,14 @@ def train(args):
                 )
             else:
                 for h in frozen_handles:
-                    producer_outputs[h.config.name] = ray.get(
+                    # async_train returns a list (one entry per worker in the
+                    # train group). On a single PP=1 actor the list has one
+                    # entry; on PP>1 only the last-PP-rank entry is populated
+                    # and the rest are {}. Pick the first non-empty dict.
+                    results = ray.get(
                         h.train_group.async_train(rollout_id, seed_data, external_data=None)
                     )
+                    producer_outputs[h.config.name] = next((r for r in results if r), {})
 
         # merge producer outputs (last-write-wins on key collision); pass None when empty
         merged_external: dict = {}

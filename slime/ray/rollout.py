@@ -638,11 +638,23 @@ class RolloutManager:
         # split by each policy's dp_size. Returns dict[name, list[batch_per_dp]].
         buckets = self._split_by_policy(data)
         if list(buckets.keys()) == ["__shared__"]:
-            raise ValueError(
-                f"Multi-policy mode active (registered: {list(self._policy_to_server)}) "
-                f"but rollout produced {len(data)} samples with no Sample.policy_name set. "
-                f"The rollout function must tag each sample with its target policy."
-            )
+            # Single-trainable multi-policy (e.g. OPD: student + frozen teacher
+            # — only the student is registered as a paired engine). The default
+            # rollout function doesn't stamp Sample.policy_name, but with
+            # exactly one registered policy the routing is unambiguous —
+            # auto-tag rather than force every such example to write a
+            # one-line custom rollout wrapper.
+            if len(self._policy_to_server) == 1:
+                only_policy = next(iter(self._policy_to_server))
+                for s in data:
+                    s.policy_name = only_policy
+                buckets = self._split_by_policy(data)
+            else:
+                raise ValueError(
+                    f"Multi-policy mode active (registered: {list(self._policy_to_server)}) "
+                    f"but rollout produced {len(data)} samples with no Sample.policy_name set. "
+                    f"The rollout function must tag each sample with its target policy."
+                )
         out: dict[str, list] = {}
         for name, bucket in buckets.items():
             if name == "__shared__":
