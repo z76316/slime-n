@@ -1,0 +1,1203 @@
+# 102 homogeneous exam-taking agents, colocate-friendly sizing.
+#
+# Per-trajectory advantage (3-channel: self/swarm/peer) is composed at
+# rollout time in agent_system.py and stored as Sample.reward. The run
+# script must pass --disable-rewards-normalization so slime does not
+# re-normalize.
+#
+# Cluster sizing (with --colocate):
+#   actor_gpus   = sum(megatron_num_nodes * num_gpus_per_node) = 102 × 1 × 1 = 102
+#   rollout_gpus = sum(sglang_num_nodes   * num_gpus_per_node) = 102 × 1 × 1 = 102
+#   total (colocate) = max(actor_gpus, rollout_gpus)           = 102
+#
+# Multi-node required: 102 GPUs. NUM_GPUS_PER_NODE must divide 102.
+# Divisors of 102: 1, 2, 3, 6, 17, 34, 51, 102. Common cluster shapes:
+#   - 17 nodes × 6 GPUs   (NUM_GPUS_PER_NODE=6, NUM_NODES=17)   ← default
+#   - 34 nodes × 3 GPUs   (NUM_GPUS_PER_NODE=3, NUM_NODES=34)
+#   - 51 nodes × 2 GPUs   (NUM_GPUS_PER_NODE=2, NUM_NODES=51)
+# 8-GPU nodes do NOT divide 102 (102 % 8 = 6). For 8-GPU clusters, edit
+# this file to N=96 (12×8) or N=104 (13×8) and update agent_system.py:
+# N_AGENTS to match.
+#
+# Also bump N_AGENTS in agent_system.py to 102 before running.
+
+# YAML anchors for the megatron/sglang sub-blocks keep the 102 policy
+# entries DRY. All policies are byte-identical aside from name and save.
+
+_megatron_defaults: &megatron_defaults
+  megatron_to_hf_mode: bridge
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 1
+  context_parallel_size: 1
+  expert_model_parallel_size: 1
+  expert_tensor_parallel_size: 1
+
+  recompute_granularity: full
+  recompute_method: uniform
+  recompute_num_layers: 1
+
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  accumulate_allreduce_grads_in_fp32: true
+  attention_softmax_in_fp32: true
+
+  log_probs_chunk_size: 512
+
+  micro_batch_size: 1
+  global_batch_size: 64
+  use_dynamic_batch_size: true
+  max_tokens_per_gpu: 18432
+
+  optimizer: adam
+  lr: 1.0e-6
+  lr_decay_style: constant
+  weight_decay: 0.1
+  adam_beta1: 0.9
+  adam_beta2: 0.98
+  optimizer_cpu_offload: true
+  overlap_cpu_optimizer_d2h_h2d: true
+  use_precision_aware_optimizer: true
+
+  advantage_estimator: grpo
+  n_samples_per_prompt: 8
+  eps_clip: 0.2
+  eps_clip_high: 0.28
+  kl_coef: 0
+  use_kl_loss: false
+  kl_loss_coef: 0
+
+_sglang_defaults: &sglang_defaults
+  update_weights: true
+  num_gpus_per_engine: 1
+  mem_fraction_static: 0.3
+  cuda_graph_bs: [1, 2, 4, 8, 16, 32]
+  chunked_prefill_size: 4096
+  max_running_requests: 32
+  log_level: info
+  server_groups:
+    - worker_type: regular
+      num_gpus: 1
+
+policies:
+
+  - name: agent_0
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_0
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_1
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_1
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_2
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_2
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_3
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_3
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_4
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_4
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_5
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_5
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_6
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_6
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_7
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_7
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_8
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_8
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_9
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_9
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_10
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_10
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_11
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_11
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_12
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_12
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_13
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_13
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_14
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_14
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_15
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_15
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_16
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_16
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_17
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_17
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_18
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_18
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_19
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_19
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_20
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_20
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_21
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_21
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_22
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_22
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_23
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_23
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_24
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_24
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_25
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_25
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_26
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_26
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_27
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_27
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_28
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_28
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_29
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_29
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_30
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_30
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_31
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_31
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_32
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_32
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_33
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_33
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_34
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_34
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_35
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_35
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_36
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_36
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_37
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_37
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_38
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_38
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_39
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_39
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_40
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_40
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_41
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_41
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_42
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_42
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_43
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_43
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_44
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_44
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_45
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_45
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_46
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_46
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_47
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_47
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_48
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_48
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_49
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_49
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_50
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_50
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_51
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_51
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_52
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_52
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_53
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_53
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_54
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_54
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_55
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_55
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_56
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_56
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_57
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_57
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_58
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_58
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_59
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_59
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_60
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_60
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_61
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_61
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_62
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_62
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_63
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_63
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_64
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_64
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_65
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_65
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_66
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_66
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_67
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_67
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_68
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_68
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_69
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_69
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_70
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_70
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_71
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_71
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_72
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_72
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_73
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_73
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_74
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_74
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_75
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_75
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_76
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_76
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_77
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_77
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_78
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_78
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_79
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_79
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_80
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_80
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_81
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_81
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_82
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_82
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_83
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_83
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_84
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_84
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_85
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_85
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_86
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_86
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_87
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_87
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_88
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_88
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_89
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_89
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_90
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_90
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_91
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_91
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_92
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_92
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_93
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_93
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_94
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_94
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_95
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_95
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_96
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_96
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_97
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_97
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_98
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_98
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_99
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_99
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_100
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_100
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_101
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_101
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
