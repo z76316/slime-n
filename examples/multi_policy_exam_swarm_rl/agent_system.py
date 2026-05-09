@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 ALPHA = 0.5
 BETA = 0.3
 GAMMA = 0.2
-BASELINE_MODE = "grpo"   # "grpo" | "adversarial"
+BASELINE_MODE = "grpo"  # "grpo" | "adversarial"
 ADV_CLIP = 5.0
 N_AGENTS = 8
 
@@ -237,11 +237,7 @@ async def run_agent_system(args, sample: Sample) -> list[Sample]:
     )
 
     # Phase 1 — fan out N×K parallel sglang requests.
-    tasks = [
-        agent_worker(args, prompt, f"agent_{i}", w)
-        for i in range(N_AGENTS)
-        for w in range(k)
-    ]
+    tasks = [agent_worker(args, prompt, f"agent_{i}", w) for i in range(N_AGENTS) for w in range(k)]
     await asyncio.gather(*tasks, return_exceptions=True)
 
     # Phase 2 — RLVR score every collected response.
@@ -272,8 +268,7 @@ async def run_agent_system(args, sample: Sample) -> list[Sample]:
 
     # Phase 4 — compose advantages.
     per_agent_scores = [
-        [float(s.metadata.get("raw_reward", 0.0)) for s in args.results_dict[f"agent_{i}"]]
-        for i in range(N_AGENTS)
+        [float(s.metadata.get("raw_reward", 0.0)) for s in args.results_dict[f"agent_{i}"]] for i in range(N_AGENTS)
     ]
     flat_c = [c for ks in per_agent_scores for c in ks]
     g = sum(flat_c) / len(flat_c) if flat_c else 0.0
@@ -300,14 +295,16 @@ async def run_agent_system(args, sample: Sample) -> list[Sample]:
             final = ALPHA * sa + BETA * swarm_adv + GAMMA * pa
             final = max(-ADV_CLIP, min(ADV_CLIP, final))
             s.reward = float(final)
-            s.metadata.update({
-                "self_adv": float(sa),
-                "swarm_adv": float(swarm_adv),
-                "peer_adv": float(pa),
-                "peer_max": float(peer_max_i),
-                "g": float(g),
-                "agent_idx": i,
-                "baseline_mode": BASELINE_MODE,
-            })
+            s.metadata.update(
+                {
+                    "self_adv": float(sa),
+                    "swarm_adv": float(swarm_adv),
+                    "peer_adv": float(pa),
+                    "peer_max": float(peer_max_i),
+                    "g": float(g),
+                    "agent_idx": i,
+                    "baseline_mode": BASELINE_MODE,
+                }
+            )
 
     return [s for sub in args.results_dict.values() for s in sub]
