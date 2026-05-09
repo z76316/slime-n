@@ -156,5 +156,11 @@ class RayTrainGroup:
     def clear_memory(self):
         return ray.get([actor.clear_memory.remote() for actor in self._actor_handlers])
 
+    def async_clear_memory(self) -> list:
+        """Like clear_memory() but returns refs without awaiting. Used by the
+        multi-policy driver to fan out clear_memory across all policies in
+        parallel: ``ray.get([r for h in handles for r in h.async_clear_memory()])``."""
+        return [actor.clear_memory.remote() for actor in self._actor_handlers]
+
     def set_rollout_manager(self, rollout_manager):
         return ray.get([actor.set_rollout_manager.remote(rollout_manager) for actor in self._actor_handlers])

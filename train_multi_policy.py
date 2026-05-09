@@ -151,7 +151,11 @@ def train(args):
         trainable_handles = [h for h in handles.values() if h.config.trainable]
         frozen_handles = [h for h in handles.values() if not h.config.trainable]
 
-        # frozen producers first; seed from the first trainable's rollout data
+        # frozen producers — parallel within the frozen pass: each producer reads
+        # the same seed_data and produces an independent output dict. Merging is
+        # post-hoc, so producers have no inter-policy dependency. The trainable
+        # pass below still waits for the merged external_data — that cross-pass
+        # dependency is preserved by the ray.get barrier between the two stages.
         producer_outputs: dict[str, dict] = {}
         if frozen_handles:
             seed_name = trainable_handles[0].config.name
@@ -161,13 +165,17 @@ def train(args):
                     f"frozen producers got no rollout data; skipping {[h.config.name for h in frozen_handles]}"
                 )
             else:
-                for h in frozen_handles:
-                    # async_train returns a list (one entry per worker in the
-                    # train group). On a single PP=1 actor the list has one
-                    # entry; on PP>1 only the last-PP-rank entry is populated
-                    # and the rest are {}. Pick the first non-empty dict.
-                    results = ray.get(h.train_group.async_train(rollout_id, seed_data, external_data=None))
-                    producer_outputs[h.config.name] = next((r for r in results if r), {})
+                # Launch all frozen producers concurrently; preserve the per-policy
+                # ref grouping so we can pick the first non-empty dict per producer.
+                # async_train returns list[ref] (one per worker); on PP>1 only the
+                # last-PP-rank entry is populated and the rest are {}.
+                per_policy_refs: dict[str, list] = {
+                    h.config.name: h.train_group.async_train(rollout_id, seed_data, external_data=None)
+                    for h in frozen_handles
+                }
+                for name, refs in per_policy_refs.items():
+                    results = ray.get(refs)
+                    producer_outputs[name] = next((r for r in results if r), {})
 
         # merge producer outputs (last-write-wins on key collision); pass None when empty
         merged_external: dict = {}
@@ -176,13 +184,21 @@ def train(args):
                 merged_external.update(out)
         external_for_trainable = merged_external if merged_external else None
 
-        # trainable consumers; serialized so policies sharing GPU slots don't conflict
+        # trainable consumers — parallel: each policy lives on its own GPU(s)
+        # under both colocate (M+S share one GPU) and no-colocate (separate
+        # GPUs). Cross-policy concurrent train has disjoint NCCL groups,
+        # disjoint optimizer state, and no shared mutable state — every actor
+        # is its own Ray process.
+        in_flight: list = []
         for h in trainable_handles:
             data = rollout_data.get(h.config.name) or rollout_data.get("__shared__")
             if data is None:
                 logger.warning(f"policy {h.config.name} got no rollout data")
                 continue
-            ray.get(h.train_group.async_train(rollout_id, data, external_data=external_for_trainable))
+            # async_train returns list[ref] (one per worker); flatten with extend.
+            in_flight.extend(h.train_group.async_train(rollout_id, data, external_data=external_for_trainable))
+        if in_flight:
+            ray.get(in_flight)
 
         # save per-policy checkpoints (skipped when h.config.save is unset, as for frozen producers)
         if should_run_periodic_action(rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout):
@@ -192,13 +208,22 @@ def train(args):
             if args.rollout_global_dataset:
                 ray.get(rollout_manager.save.remote(rollout_id))
 
-        # memory hygiene
+        # memory hygiene — parallel across policies (each actor's clear_memory
+        # frees only its own GPU; no cross-actor coordination).
         if not args.offload_train:
+            cleanup_refs: list = []
             for h in handles.values():
-                h.train_group.clear_memory()
+                cleanup_refs.extend(h.train_group.async_clear_memory())
+            if cleanup_refs:
+                ray.get(cleanup_refs)
 
-        # weight update — serialized; sglang engines on shared GPUs cannot accept
-        # two simultaneous broadcasts. Frozen producers have no engine; skip.
+        # weight update — kept serial: per-policy NCCL groups don't share state,
+        # but slime/ray/rollout.py:410 allocates a *single* rollout_engine_lock
+        # acquired by every policy's update_weights for the entire broadcast
+        # (slime/.../update_weight_from_distributed.py:232-248). Concurrent calls
+        # would spin-poll the same lock and end up serial with extra overhead.
+        # Train phase dominates push 10-50× per rollout; not worth fixing here.
+        # Frozen producers have no engine; skip.
         if args.offload_rollout:
             ray.get(rollout_manager.onload_weights.remote())
         for h in handles.values():
