@@ -1,0 +1,158 @@
+# 8 homogeneous exam-taking agents, colocate-friendly sizing.
+#
+# Per-trajectory advantage (3-channel: self/swarm/peer) is composed at
+# rollout time in agent_system.py and stored as Sample.reward. The run
+# script must pass --disable-rewards-normalization so slime does not
+# re-normalize.
+#
+# Cluster sizing (with --colocate):
+#   actor_gpus   = sum(megatron_num_nodes * num_gpus_per_node) = 8 × 1 × 1 = 8
+#   rollout_gpus = sum(sglang_num_nodes   * num_gpus_per_node) = 8 × 1 × 1 = 8
+#   total (colocate) = max(actor_gpus, rollout_gpus)           = 8
+
+# YAML anchors for the megatron/sglang sub-blocks keep the 8 policy
+# entries DRY. All policies are byte-identical aside from name and save.
+
+_megatron_defaults: &megatron_defaults
+  megatron_to_hf_mode: bridge
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 1
+  context_parallel_size: 1
+  expert_model_parallel_size: 1
+  expert_tensor_parallel_size: 1
+
+  recompute_granularity: full
+  recompute_method: uniform
+  recompute_num_layers: 1
+
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  accumulate_allreduce_grads_in_fp32: true
+  attention_softmax_in_fp32: true
+
+  log_probs_chunk_size: 512
+
+  micro_batch_size: 1
+  global_batch_size: 64
+  use_dynamic_batch_size: true
+  max_tokens_per_gpu: 4096
+
+  optimizer: adam
+  lr: 1.0e-6
+  lr_decay_style: constant
+  weight_decay: 0.1
+  adam_beta1: 0.9
+  adam_beta2: 0.98
+  optimizer_cpu_offload: true
+  overlap_cpu_optimizer_d2h_h2d: true
+  use_precision_aware_optimizer: true
+
+  advantage_estimator: grpo
+  n_samples_per_prompt: 8           # K=8, must match rollout_with_swarm.SWARM_CONFIGS["num_parallel"]
+  eps_clip: 0.2
+  eps_clip_high: 0.28
+  kl_coef: 0
+  use_kl_loss: false
+  kl_loss_coef: 0
+
+_sglang_defaults: &sglang_defaults
+  update_weights: true
+  num_gpus_per_engine: 1
+  mem_fraction_static: 0.3          # leave room for colocated Megatron during train phase
+  cuda_graph_bs: [1, 2, 4, 8, 16, 32]
+  chunked_prefill_size: 4096
+  max_running_requests: 32
+  log_level: info
+  server_groups:
+    - worker_type: regular
+      num_gpus: 1
+
+policies:
+
+  - name: agent_0
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_0
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_1
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_1
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_2
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_2
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_3
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_3
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_4
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_4
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_5
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_5
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_6
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_6
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
+
+  - name: agent_7
+    role: actor
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_exam_swarm_rl/qwen3-0.6b/agent_7
+    buffer_mode: split
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+    megatron: *megatron_defaults
+    sglang: *sglang_defaults
