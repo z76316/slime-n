@@ -27,14 +27,6 @@ bash examples/multi_policy_multiagent_debate/run-qwen3-0.6B-multiagent-debate.sh
   * **generator** (round 0): `1` if its boxed answer = ŷ, else `0`.
   * **critic** (any round): trajectory-level — `1` if THIS agent's FINAL critic response = ŷ, propagated to all of that agent's critic rounds.
 
-## Policies
-
-| policy | megatron | sglang | trainable | role |
-|---|---|---|---|---|
-| `generator` | ✓ | ✓ | ✓ | round-0 answer generator |
-| `critic` | ✓ | ✓ | ✓ | round-1+ answer updater |
-
-Cluster: 4 GPUs (2 megatron + 2 sglang, no colocate).
 
 ## Results
 
