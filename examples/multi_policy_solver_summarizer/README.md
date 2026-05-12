@@ -23,14 +23,6 @@ bash examples/multi_policy_solver_summarizer/run-qwen3-0.6B-solver-summarizer.sh
 * Reward: solver gets RLVR correctness on its own response; summarizer gets correctness on its synthesized answer (graded directly, no index lookup). Group shaping multiplies both roles by 1.2 if mean parsed-summarizer reward > 0.5, else by 0.8. If the summarizer phase fails entirely, raw rewards are preserved (anti-train guard).
 * Each policy has its own buffer (`buffer_mode: split`), routed by `Sample.policy_name`. `n_samples_per_prompt = num_parallel = 4` for GRPO group-norm.
 
-## Policies
-
-| policy | megatron | sglang | trainable | role |
-|---|---|---|---|---|
-| `solver` | ✓ | ✓ | ✓ | candidate solution generator |
-| `summarizer` | ✓ | ✓ | ✓ | synthesizes final answer from N candidates |
-
-Cluster: 4 GPUs (2 megatron + 2 sglang, no colocate).
 
 ## Results
 
