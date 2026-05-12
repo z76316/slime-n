@@ -31,40 +31,28 @@ Multi-policy runs are defined by a single YAML file passed with `--config`. The 
 
 ```yaml
 policies:
-  - name: student                 # unique policy name; also the paired SGLang server name
-    role: actor                   # only actor is supported today
-    trainable: true               # false for frozen producers such as OPD teachers
-
+  - name: student
+    role: actor
+    trainable: true
     hf_checkpoint: /root/Qwen3-0.6B
-    load: /ckpt/student           # optional Megatron torch_dist resume path
-    save: /ckpt/student           # optional per-policy save path
-    ref_load: /ckpt/ref           # optional KL reference checkpoint
-
-    buffer_mode: split            # split | shared
+    load: /ckpt/student
+    buffer_mode: split
 
     num_gpus_per_node: 1
-    megatron_num_nodes: 1         # Megatron actor GPUs = nodes * num_gpus_per_node
-    sglang_num_nodes: 1           # SGLang engine GPUs = nodes * num_gpus_per_node
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
 
     megatron:
-      megatron_to_hf_mode: bridge
       tensor_model_parallel_size: 1
-      pipeline_model_parallel_size: 1
-      context_parallel_size: 1
-      micro_batch_size: 1
       global_batch_size: 64
       lr: 1.0e-6
       advantage_estimator: grpo
       n_samples_per_prompt: 4
-      log_probs_chunk_size: 512
 
     sglang:
-      update_weights: true
       num_gpus_per_engine: 1
       mem_fraction_static: 0.85
-      server_groups:
-        - worker_type: regular
-          num_gpus: 1
+      server_groups: [{ worker_type: regular, num_gpus: 1 }]
 ```
 
 The `megatron:` block is flattened into the per-policy Megatron argument namespace, so parallelism, recompute, batching, optimizer, loss, KL, and OPD fields can differ by policy. The `sglang:` block is projected into the SGLang model/server config; `model_path` defaults to `hf_checkpoint`, and server arguments such as `mem_fraction_static`, `cuda_graph_bs`, and `max_total_tokens` are passed through to each server group.
@@ -81,12 +69,7 @@ Two trainable paired policies implement a paper-aligned debate workflow. In roun
 
 Rewards are computed from the final critic responses: the system majority-votes a final answer `ŷ`; round-0 generator samples are rewarded for matching `ŷ`, and each critic trajectory receives reward 1 when that agent's final critic answer matches `ŷ`. The dataset gold label is intentionally ignored in this example.
 
-| policy | megatron | sglang | trainable | role |
-|---|---|---|---|---|
-| `generator` | ✓ | ✓ | ✓ | round-0 answer generator |
-| `critic` | ✓ | ✓ | ✓ | round-1+ answer updater |
-
-The summarize step is routed through the generator SGLang engine, but its samples are not added to a training buffer. Code: [`examples/multi_policy_multiagent_debate`](examples/multi_policy_multiagent_debate).
+Both `generator` and `critic` are trainable paired policies (Megatron + SGLang). The summarize step is routed through the generator SGLang engine, but its samples are not added to a training buffer. Code: [`examples/multi_policy_multiagent_debate`](examples/multi_policy_multiagent_debate).
 
 ### 2. Multi-Policy Solver + Summarizer — candidate generation + final answer synthesis
 
@@ -94,22 +77,14 @@ Two trainable paired policies cooperate on math problems. The `solver` policy ge
 
 Both policies train on split buffers and receive direct RLVR correctness rewards on their own completions. The example also applies group reward shaping from the summarizer phase: if the mean summarizer reward is high, both roles are upweighted; otherwise both roles are downweighted.
 
-| policy | megatron | sglang | trainable | role |
-|---|---|---|---|---|
-| `solver` | ✓ | ✓ | ✓ | candidate solution generator |
-| `summarizer` | ✓ | ✓ | ✓ | final answer synthesizer |
-
-Code: [`examples/multi_policy_solver_summarizer`](examples/multi_policy_solver_summarizer).
+Both `solver` and `summarizer` are trainable paired policies (Megatron + SGLang). Code: [`examples/multi_policy_solver_summarizer`](examples/multi_policy_solver_summarizer).
 
 ### 3. OPD — on-policy distillation (student + frozen teacher)
 
-Trainable **student** generates rollouts; frozen **teacher** runs forward-only on those rollouts and returns per-token logprobs that feed a reverse-KL term into the student's loss. The schema admits two teacher backends:
+Trainable **student** generates rollouts; frozen **teacher** runs forward-only on those rollouts and returns per-token logprobs that feed a reverse-KL term into the student's loss. The `student` is a standard trainable paired policy (Megatron + SGLang). The schema admits two teacher backends, both frozen:
 
-| policy | megatron | sglang | trainable | role |
-|---|---|---|---|---|
-| `student` | ✓ | ✓ | ✓ | paired pipeline; generates rollouts |
-| `teacher` *(Megatron — recommended, kernel-consistent)* | ✓ | ✗ | ✗ | standalone actor; per-token logprobs |
-| `teacher` *(SGLang — cheaper, kernel mismatch)* | ✗ | ✓ | ✗ | standalone engine; per-token logprobs |
+- **Megatron teacher** — standalone Megatron actor, no SGLang engine. Recommended; its forward kernels match the student's training-time forward, keeping the KL noise floor low.
+- **SGLang teacher** — standalone SGLang engine, no Megatron actor. Cheaper deployment and supports a larger teacher, at the cost of a small kernel mismatch on the KL term.
 
 The teacher's `train()` returns `{"teacher_log_probs": ...}`. The driver merges all frozen-policy outputs into the student's `external_data`, which `train_actor` writes into `rollout_data` so `apply_opd_kl_to_advantages` can consume it.
 
