@@ -262,8 +262,12 @@ def build_sglang_config_from_policies(configs: list[PolicyConfig]):
 
     models = []
     for cfg in configs:
-        # Frozen producers (e.g. OPD Megatron teacher) have no engine.
-        if not cfg.trainable:
+        # Skip policies that don't host an engine. Predicate is per-policy GPU
+        # allocation, not trainability — frozen standalone SGLang engines
+        # (m✗ s✓ trainable=false, e.g. judge / RM / OPD SGLang teacher) need a
+        # ModelConfig too. Megatron-only frozen producers (m✓ s✗) have
+        # sglang_num_nodes=0 and are correctly skipped.
+        if cfg.sglang_num_nodes == 0:
             continue
         if cfg.sglang is None:
             raise ValueError(f"{cfg.name}: missing 'sglang' sub-block in config")
@@ -299,9 +303,10 @@ def derive_cluster_sizing(configs: list[PolicyConfig], colocate: bool) -> tuple[
       - create_placement_groups_multi (to size the global PG)
     """
     actor_gpus = sum(c.megatron_num_nodes * c.num_gpus_per_node for c in configs)
-    # Frozen producers don't run an sglang engine, so they don't contribute
-    # to the rollout-side GPU budget.
-    rollout_gpus = sum(c.sglang_num_nodes * c.num_gpus_per_node for c in configs if c.trainable)
+    # Sum across all policies — Megatron-only producers (m✓ s✗) contribute 0
+    # via their sglang_num_nodes=0; engine-hosting policies (trainable paired
+    # and frozen standalone) contribute their actual engine GPUs.
+    rollout_gpus = sum(c.sglang_num_nodes * c.num_gpus_per_node for c in configs)
     total_gpus = max(actor_gpus, rollout_gpus) if colocate else actor_gpus + rollout_gpus
     return actor_gpus, rollout_gpus, total_gpus
 

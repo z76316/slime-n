@@ -115,7 +115,18 @@ def train(args):
 
     # build N RayTrainGroups, register each with the manager, async_init, and
     # reconcile start_rollout_ids across policies. Returns dict[name, PolicyHandle].
-    handles = create_training_models_multi(args, pgs, rollout_manager, policy_configs)
+    # Pre-filter out megatron-less policies (m✗ s✓ frozen standalone engines
+    # like OPD SGLang teacher / judge / RM) so create_training_models_multi
+    # doesn't try to allocate a RayTrainGroup(num_nodes=0) for them. Those
+    # policies' SGLang servers were already spawned via the sglang_config
+    # path; we just need a PolicyHandle placeholder so per-handle iterations
+    # in the train loop can find them.
+    megatron_cfgs = [c for c in policy_configs if c.megatron_num_nodes > 0]
+    handles = create_training_models_multi(args, pgs, rollout_manager, megatron_cfgs)
+    from slime.utils.policy_config import PolicyHandle, config_to_namespace
+    for cfg in policy_configs:
+        if cfg.megatron_num_nodes == 0:
+            handles[cfg.name] = PolicyHandle(config=cfg, args=config_to_namespace(cfg, args), train_group=None)
 
     # Always push trainable actor weights to rollout once weights are loaded.
     # Frozen producers have no paired engine; skip.
@@ -149,7 +160,13 @@ def train(args):
         # to a single-pass loop with external_data=None — bit-identical to
         # pre-multi-producer behavior.
         trainable_handles = [h for h in handles.values() if h.config.trainable]
-        frozen_handles = [h for h in handles.values() if not h.config.trainable]
+        # Frozen producers run their Megatron forward-only train() to emit
+        # external_data (e.g. teacher_log_probs). Engine-only frozen policies
+        # (m✗ s✓ standalone SGLang teacher) have train_group=None and
+        # contribute via rollout-time HTTP, not via this pass.
+        frozen_handles = [
+            h for h in handles.values() if not h.config.trainable and h.train_group is not None
+        ]
 
         # frozen producers — parallel within the frozen pass: each producer reads
         # the same seed_data and produces an independent output dict. Merging is
@@ -209,10 +226,14 @@ def train(args):
                 ray.get(rollout_manager.save.remote(rollout_id))
 
         # memory hygiene — parallel across policies (each actor's clear_memory
-        # frees only its own GPU; no cross-actor coordination).
+        # frees only its own GPU; no cross-actor coordination). Engine-only
+        # policies have no Megatron actor (train_group is None) and nothing
+        # to clear.
         if not args.offload_train:
             cleanup_refs: list = []
             for h in handles.values():
+                if h.train_group is None:
+                    continue
                 cleanup_refs.extend(h.train_group.async_clear_memory())
             if cleanup_refs:
                 ray.get(cleanup_refs)
