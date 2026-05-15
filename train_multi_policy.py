@@ -124,6 +124,7 @@ def train(args):
     megatron_cfgs = [c for c in policy_configs if c.megatron_num_nodes > 0]
     handles = create_training_models_multi(args, pgs, rollout_manager, megatron_cfgs)
     from slime.utils.policy_config import PolicyHandle, config_to_namespace
+
     for cfg in policy_configs:
         if cfg.megatron_num_nodes == 0:
             handles[cfg.name] = PolicyHandle(config=cfg, args=config_to_namespace(cfg, args), train_group=None)
@@ -164,9 +165,7 @@ def train(args):
         # external_data (e.g. teacher_log_probs). Engine-only frozen policies
         # (m✗ s✓ standalone SGLang teacher) have train_group=None and
         # contribute via rollout-time HTTP, not via this pass.
-        frozen_handles = [
-            h for h in handles.values() if not h.config.trainable and h.train_group is not None
-        ]
+        frozen_handles = [h for h in handles.values() if not h.config.trainable and h.train_group is not None]
 
         # frozen producers — parallel within the frozen pass: each producer reads
         # the same seed_data and produces an independent output dict. Merging is

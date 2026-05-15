@@ -37,9 +37,7 @@ from slime.utils.http_utils import post
 from slime.utils.types import Sample
 
 
-async def generate_with_teacher_sglang(
-    args, sample: Sample, sampling_params, evaluation: bool = False
-) -> Sample:
+async def generate_with_teacher_sglang(args, sample: Sample, sampling_params, evaluation: bool = False) -> Sample:
     sample = await generate(args, sample, sampling_params)
 
     if sample.status == Sample.Status.ABORTED or sample.response_length == 0:
@@ -66,5 +64,5 @@ async def generate_with_teacher_sglang(
         [item[0] for item in resp["meta_info"]["input_token_logprobs"][1:]],
         dtype=torch.float32,
     )
-    sample.teacher_log_probs = all_logprobs[-sample.response_length:]
+    sample.teacher_log_probs = all_logprobs[-sample.response_length :]
     return sample
