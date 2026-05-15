@@ -1,6 +1,6 @@
 <div align="center">
 
-# $\huge\color{#1E293B}{\textsf{\textbf{slime}}}^{\color{#3B82F6}{\textsf{\textbf{n}}}}$
+# slime<sup>[n](https://github.com/slime-n/slime-n)</sup>
 
 ### A Multi-Policy, Multi-Agent RL Framework
 
