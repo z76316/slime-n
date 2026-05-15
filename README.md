@@ -8,7 +8,7 @@
 </div>
 
 
-slime<sup>n</sup> extends [slime](https://github.com/THUDM/slime) into a flexible multi-policy and multi-agent RL training framework. Each run can be composed of any combination of three policy types:
+slime<sup>[n](https://github.com/slime-n/slime-n)</sup> extends [slime](https://github.com/THUDM/slime) into a flexible multi-policy and multi-agent RL training framework. Each run can be composed of any combination of three policy types:
 
 
 
@@ -31,11 +31,11 @@ Multi-policy runs are defined by a single YAML file passed with `--config`. The 
 
 ```yaml
 policies:
-  - name: student
+  - name: solver
     role: actor
     trainable: true
     hf_checkpoint: /root/Qwen3-0.6B
-    load: /ckpt/student
+    load: /ckpt/solver
     buffer_mode: split
 
     num_gpus_per_node: 1
@@ -47,17 +47,40 @@ policies:
       global_batch_size: 64
       lr: 1.0e-6
       advantage_estimator: grpo
-      n_samples_per_prompt: 4
+      n_samples_per_prompt: 8
 
     sglang:
       num_gpus_per_engine: 1
       mem_fraction_static: 0.85
-      server_groups: [{ worker_type: regular, num_gpus: 1 }]
+
+  - name: summarizer
+    role: actor
+    trainable: true
+    hf_checkpoint: /root/Qwen3-0.6B
+    load: /ckpt/summarizer
+    buffer_mode: split
+
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+
+    megatron:
+      tensor_model_parallel_size: 1
+      global_batch_size: 64
+      lr: 1.0e-6
+      advantage_estimator: grpo
+      n_samples_per_prompt: 8
+
+    sglang:
+      num_gpus_per_engine: 1
+      mem_fraction_static: 0.85
 ```
 
-The `megatron:` block is flattened into the per-policy Megatron argument namespace, so parallelism, recompute, batching, optimizer, loss, KL, and OPD fields can differ by policy. The `sglang:` block is projected into the SGLang model/server config; `model_path` defaults to `hf_checkpoint`, and server arguments such as `mem_fraction_static`, `cuda_graph_bs`, and `max_total_tokens` are passed through to each server group.
+The example above defines the solver+summarizer multi-policy run: `solver` generates 8 candidate solutions per prompt, and `summarizer` synthesizes a final answer over those candidates. Both policies use `n_samples_per_prompt: 8` so GRPO has a group of size 8 for advantage normalization on each side. Each trainable policy has its own paired Megatron actor and SGLang engine; both train on split buffers tagged via `Sample.policy_name`.
 
-Cluster sizing is derived from the YAML. Without `--colocate`, total GPUs are `sum(megatron_num_nodes * num_gpus_per_node) + sum(sglang_num_nodes * num_gpus_per_node)` across active policies. With `--colocate`, slime uses the larger of the Megatron and SGLang sides. For trainable policies with an engine, `sglang_num_nodes * num_gpus_per_node` must match the sum of `sglang.server_groups[].num_gpus`. A frozen standalone Megatron teacher sets `trainable: false` and `sglang_num_nodes: 0`.
+The `megatron:` block is flattened into the per-policy Megatron argument namespace, so parallelism, recompute, batching, optimizer, loss, KL, and OPD fields can differ by policy. The `sglang:` block is projected into the SGLang model/server config; `model_path` defaults to `hf_checkpoint`, and server arguments such as `mem_fraction_static`, `cuda_graph_bs`, and `max_total_tokens` are passed through.
+
+Cluster sizing is derived from the YAML. Without `--colocate`, total GPUs are `sum(megatron_num_nodes * num_gpus_per_node) + sum(sglang_num_nodes * num_gpus_per_node)` across active policies. With `--colocate`, slime uses the larger of the Megatron and SGLang sides. A frozen standalone Megatron teacher sets `trainable: false` and `sglang_num_nodes: 0`.
 
 ## Examples
 
