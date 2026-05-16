@@ -8,7 +8,7 @@
 </div>
 
 
-slime<sup>[n](https://github.com/slime-n/slime-n)</sup> extends [slime](https://github.com/THUDM/slime) into a flexible multi-policy and multi-agent RL training framework. Each run can be composed of any combination of three policy types:
+slime<sup>n</sup> extends [slime](https://github.com/THUDM/slime) into a flexible multi-policy and multi-agent RL training framework. Each run can be composed of any combination of three policy types:
 
 
 
@@ -112,6 +112,12 @@ Trainable **student** generates rollouts; frozen **teacher** runs forward-only o
 The teacher's `train()` returns `{"teacher_log_probs": ...}`. The driver merges all frozen-policy outputs into the student's `external_data`, which `train_actor` writes into `rollout_data` so `apply_opd_kl_to_advantages` can consume it.
 
 Code: [`examples/multi_policy_opd_megatron`](examples/multi_policy_opd_megatron) (Megatron-backend teacher). The SGLang-backend variant uses the same schema; example pending.
+
+### 4. PPO — asymmetric actor + critic
+
+Trainable **actor** (Qwen3-1.7B) generates rollouts; trainable **critic** (Qwen3-0.6B) runs `train_critic` on those rollouts and emits per-token `values` that feed PPO advantages into the actor's loss. The critic is a standalone trainable Megatron actor (`m✓ s✗`) — no SGLang engine, just a value head. Per-policy `megatron_model_args` lets actor and critic differ in architecture, which legacy single-policy PPO cannot do (`train.py + --critic-config-path` ties them to the same CLI-global `MODEL_ARGS`).
+
+Code: [`examples/multi_policy_ppo`](examples/multi_policy_ppo).
 
 ## Run
 
