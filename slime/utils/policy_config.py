@@ -145,6 +145,14 @@ class PolicyConfig:
     # ── sglang sub-block (raw dict, projected to SglangConfig.ModelConfig later) ──
     sglang: dict | None = None
 
+    # ── per-policy Megatron flag overrides (architecture, etc.) ──
+    # Catches any key in the YAML `megatron:` block that is not a declared
+    # PolicyConfig field. config_to_namespace applies each as setattr on the
+    # per-policy ns, so a YAML key like `num_layers: 48` overrides whatever
+    # came from the global CLI MODEL_ARGS. Needed when N policies in one run
+    # don't share architecture (e.g. small student + large MoE teacher).
+    extra_megatron_args: dict | None = None
+
 
 def validate_policy_config(cfg: PolicyConfig) -> None:
     if cfg.role != "actor":
@@ -189,6 +197,16 @@ def parse_policy_configs(config_path: str) -> list[PolicyConfig]:
         sglang_block = dict(entry.get("sglang") or {})
         sglang_block.setdefault("model_path", entry.get("hf_checkpoint"))
 
+        # Split the megatron sub-block into (a) keys that match PolicyConfig
+        # dataclass fields (declared) and (b) extras (anything else). Extras
+        # are passed through as per-policy CLI overrides via
+        # extra_megatron_args (architecture flags like num_layers / num_experts
+        # live there when policies don't share architecture).
+        known_field_names = {f.name for f in dataclasses.fields(PolicyConfig)}
+        megatron_block = entry.get("megatron") or {}
+        megatron_known = {k: v for k, v in megatron_block.items() if k in known_field_names}
+        megatron_extras = {k: v for k, v in megatron_block.items() if k not in known_field_names}
+
         flat: dict[str, Any] = {
             "name": entry["name"],
             "role": entry.get("role", "actor"),
@@ -201,7 +219,8 @@ def parse_policy_configs(config_path: str) -> list[PolicyConfig]:
             "num_gpus_per_node": entry.get("num_gpus_per_node", 8),
             "megatron_num_nodes": entry.get("megatron_num_nodes", 1),
             "sglang_num_nodes": entry.get("sglang_num_nodes", 1),
-            **(entry.get("megatron") or {}),
+            **megatron_known,
+            "extra_megatron_args": megatron_extras or None,
             "sglang": sglang_block,
             "sglang_server": entry["name"],  # 1:1 pairing: server name = policy name
         }
@@ -338,6 +357,14 @@ def config_to_namespace(cfg: PolicyConfig, base_args):
     ns = Namespace(**vars(base_args))
     for f in dataclasses.fields(cfg):
         setattr(ns, f.name, getattr(cfg, f.name))
+    # Apply per-policy Megatron flag overrides (extra_megatron_args) as the
+    # last step before slime-specific reconciliation below. Unknown YAML keys
+    # in the `megatron:` block land here; setattr-ing them onto ns overrides
+    # whatever the global CLI MODEL_ARGS pushed onto base_args. This is how
+    # an N-policy run can host policies with different architectures.
+    if cfg.extra_megatron_args:
+        for k, v in cfg.extra_megatron_args.items():
+            setattr(ns, k, v)
     ns.actor_num_nodes = cfg.megatron_num_nodes
     ns.actor_num_gpus_per_node = cfg.num_gpus_per_node
     ns.num_gpus_per_node = cfg.num_gpus_per_node

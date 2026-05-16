@@ -172,7 +172,13 @@ def train(args):
         # post-hoc, so producers have no inter-policy dependency. The trainable
         # pass below still waits for the merged external_data — that cross-pass
         # dependency is preserved by the ray.get barrier between the two stages.
-        producer_outputs: dict[str, dict] = {}
+        # producer_outputs[name] is the per-rank list (length = producer's
+        # world_size), not a single collapsed dict — required so each
+        # trainable rank gets its own producer rank's output (e.g. teacher
+        # rank r's teacher_log_probs lands at student rank r). Collapsing
+        # to "first non-empty" worked when DP=1 but silently broke alignment
+        # with DP>1 (student rank N would receive teacher rank 0's shard).
+        producer_outputs: dict[str, list[dict]] = {}
         if frozen_handles:
             seed_name = trainable_handles[0].config.name
             seed_data = rollout_data.get(seed_name) or rollout_data.get("__shared__")
@@ -181,38 +187,62 @@ def train(args):
                     f"frozen producers got no rollout data; skipping {[h.config.name for h in frozen_handles]}"
                 )
             else:
-                # Launch all frozen producers concurrently; preserve the per-policy
-                # ref grouping so we can pick the first non-empty dict per producer.
-                # async_train returns list[ref] (one per worker); on PP>1 only the
-                # last-PP-rank entry is populated and the rest are {}.
+                # Launch all frozen producers concurrently; preserve per-rank
+                # output so the trainable consumers can pull the right shard
+                # (PP>1: only the last-PP-rank entry is populated, rest are {};
+                # the consumer's actor.train ignores empty external_data).
                 per_policy_refs: dict[str, list] = {
                     h.config.name: h.train_group.async_train(rollout_id, seed_data, external_data=None)
                     for h in frozen_handles
                 }
                 for name, refs in per_policy_refs.items():
-                    results = ray.get(refs)
-                    producer_outputs[name] = next((r for r in results if r), {})
-
-        # merge producer outputs (last-write-wins on key collision); pass None when empty
-        merged_external: dict = {}
-        for out in producer_outputs.values():
-            if out:
-                merged_external.update(out)
-        external_for_trainable = merged_external if merged_external else None
+                    producer_outputs[name] = ray.get(refs)
 
         # trainable consumers — parallel: each policy lives on its own GPU(s)
         # under both colocate (M+S share one GPU) and no-colocate (separate
         # GPUs). Cross-policy concurrent train has disjoint NCCL groups,
         # disjoint optimizer state, and no shared mutable state — every actor
         # is its own Ray process.
+        #
+        # external_data is built per-consumer as a list[dict] (one dict per
+        # consumer worker), where each rank's dict merges same-rank outputs
+        # from every frozen producer. RayTrainGroup.async_train already
+        # supports the list[dict] signature for per-rank routing. With no
+        # frozen producers it stays None (single-pass loop, byte-identical to
+        # pre-multi-producer behavior). After PP filtering, the producer's
+        # effective "DP world" (the non-empty last-PP-stage ranks, in DP
+        # order under Megatron's default tp-cp-ep-dp-pp mesh) must equal
+        # consumer.world_size.
         in_flight: list = []
         for h in trainable_handles:
             data = rollout_data.get(h.config.name) or rollout_data.get("__shared__")
             if data is None:
                 logger.warning(f"policy {h.config.name} got no rollout data")
                 continue
+            consumer_external = None
+            if producer_outputs:
+                num_ranks = len(h.train_group._actor_handlers)
+                per_rank: list[dict] = [{} for _ in range(num_ranks)]
+                for name, results in producer_outputs.items():
+                    # PP-aware: producers with PP>1 emit logprobs only on
+                    # last-PP-stage ranks; the rest return {}. Megatron's
+                    # default --order tp-cp-ep-dp-pp puts last-PP-stage ranks
+                    # contiguous at the tail in DP rank order, so filtering
+                    # non-empty preserves the DP→consumer-rank mapping.
+                    non_empty = [out for out in results if out]
+                    if len(non_empty) != num_ranks:
+                        raise RuntimeError(
+                            f"frozen producer {name!r} has {len(non_empty)} non-empty rank outputs "
+                            f"(of {len(results)} total ranks) but trainable consumer "
+                            f"{h.config.name!r} has {num_ranks} ranks. Producer's last-PP-stage "
+                            "DP must match consumer's DP."
+                        )
+                    for r, out in enumerate(non_empty):
+                        per_rank[r].update(out)
+                if any(per_rank):
+                    consumer_external = per_rank
             # async_train returns list[ref] (one per worker); flatten with extend.
-            in_flight.extend(h.train_group.async_train(rollout_id, data, external_data=external_for_trainable))
+            in_flight.extend(h.train_group.async_train(rollout_id, data, external_data=consumer_external))
         if in_flight:
             ray.get(in_flight)
 
