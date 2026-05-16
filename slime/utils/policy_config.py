@@ -150,17 +150,38 @@ class PolicyConfig:
     # PolicyConfig field. config_to_namespace applies each as setattr on the
     # per-policy ns, so a YAML key like `num_layers: 48` overrides whatever
     # came from the global CLI MODEL_ARGS. Needed when N policies in one run
-    # don't share architecture (e.g. small student + large MoE teacher).
+    # don't share architecture (e.g. small student + large MoE teacher, or
+    # the asymmetric PPO actor + critic example).
     extra_megatron_args: dict | None = None
 
 
+def has_sglang_engine(cfg: PolicyConfig) -> bool:
+    """True iff the policy hosts an SGLang engine.
+
+    `cfg.sglang_server` is NOT a reliable predicate — the parser sets it to
+    `entry["name"]` unconditionally, even when `sglang_num_nodes == 0`.
+    `sglang_num_nodes` is the source of truth for engine existence.
+    """
+    return cfg.sglang_num_nodes > 0
+
+
+def is_critic_shape(cfg: PolicyConfig) -> bool:
+    """PPO critic shape: trainable Megatron-only policy with ppo advantage_estimator.
+
+    Used by placement_group.py to wire role="critic" (which makes the model
+    provider attach a 1-dim value head and skips weight_updater init) and to
+    flip args.use_critic=True on sibling actors. NOT used by the multi-policy
+    driver — the driver partitions by `has_sglang_engine` (shape), not by
+    PPO-specific role semantics.
+    """
+    return cfg.trainable and not has_sglang_engine(cfg) and cfg.advantage_estimator == "ppo"
+
+
 def validate_policy_config(cfg: PolicyConfig) -> None:
-    if cfg.role != "actor":
-        raise ValueError(
-            f"{cfg.name}: only role='actor' supported, got {cfg.role!r} " f"(critic deferred — PPO out of scope)"
-        )
+    if cfg.role not in {"actor", "critic"}:
+        raise ValueError(f"{cfg.name}: role must be 'actor' or 'critic', got {cfg.role!r}")
     if cfg.sglang_server is None:
-        raise ValueError(f"{cfg.name}: actor requires sglang_server (1:1 pairing)")
+        raise ValueError(f"{cfg.name}: policy requires sglang_server (1:1 pairing; defaults to policy name)")
     if cfg.buffer_mode not in {"shared", "split"}:
         raise ValueError(f"{cfg.name}: buffer_mode must be 'shared' or 'split'")
     if not cfg.hf_checkpoint:
@@ -341,6 +362,11 @@ class PolicyHandle:
     config: PolicyConfig
     args: Any  # PolicyConfig projected onto a Namespace for downstream Megatron code
     train_group: Any  # RayTrainGroup
+    # Runtime-derived role passed to allocate_train_group and async_init.
+    # For shape-derived critic, this is "critic"; otherwise mirrors cfg.role.
+    # Kept distinct from cfg.role so the YAML-declared value stays intact for
+    # logs/saves.
+    role_eff: str = "actor"
 
 
 def config_to_namespace(cfg: PolicyConfig, base_args):
@@ -434,6 +460,7 @@ def config_to_namespace(cfg: PolicyConfig, base_args):
             if getattr(ns, "ref_ckpt_step", None) is not None:
                 ns.ckpt_step = ns.ref_ckpt_step
             ns.start_rollout_id = 0
+
     return ns
 
 

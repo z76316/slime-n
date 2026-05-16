@@ -130,11 +130,14 @@ def train(args):
             handles[cfg.name] = PolicyHandle(config=cfg, args=config_to_namespace(cfg, args), train_group=None)
 
     # Always push trainable actor weights to rollout once weights are loaded.
-    # Frozen producers have no paired engine; skip.
+    # Skip policies that don't host an engine (frozen Megatron teachers,
+    # PPO critics) — they have no paired SGLang server to push to.
+    from slime.utils.policy_config import has_sglang_engine
+
     if args.offload_rollout:
         ray.get(rollout_manager.onload_weights.remote())
     for h in handles.values():
-        if h.config.trainable:
+        if h.config.trainable and has_sglang_engine(h.config):
             h.train_group.update_weights()
     if args.offload_rollout:
         ray.get(rollout_manager.onload_kv.remote())
@@ -154,51 +157,64 @@ def train(args):
         if args.offload_rollout:
             ray.get(rollout_manager.offload.remote())
 
-        # Train in two passes. Frozen producers (e.g. OPD Megatron teacher)
-        # run forward-only first on the trainable policy's rollout data;
-        # their returned dicts merge into a single external_data passed to
-        # all trainable consumers. With no frozen producers this collapses
-        # to a single-pass loop with external_data=None — bit-identical to
-        # pre-multi-producer behavior.
-        trainable_handles = [h for h in handles.values() if h.config.trainable]
-        # Frozen producers run their Megatron forward-only train() to emit
-        # external_data (e.g. teacher_log_probs). Engine-only frozen policies
-        # (m✗ s✓ standalone SGLang teacher) have train_group=None and
-        # contribute via rollout-time HTTP, not via this pass.
-        frozen_handles = [h for h in handles.values() if not h.config.trainable and h.train_group is not None]
-
-        # frozen producers — parallel within the frozen pass: each producer reads
-        # the same seed_data and produces an independent output dict. Merging is
-        # post-hoc, so producers have no inter-policy dependency. The trainable
-        # pass below still waits for the merged external_data — that cross-pass
-        # dependency is preserved by the ray.get barrier between the two stages.
+        # Train in three passes, partitioned by shape (engine vs. no engine):
+        #   1. frozen               — frozen Megatron producers (OPD teacher).
+        #   2. trainable_standalone — trainable Megatron-only producers (PPO
+        #                             critic today). Output feeds trainable_pair
+        #                             via external_data.
+        #   3. trainable_pair       — trainable actors with paired SGLang engines;
+        #                             consume merged_external from the two
+        #                             producer passes.
+        # Pass order is load-bearing: pass 2's outputs must land in
+        # producer_outputs before pass 3 reads them. Within each pass, all
+        # producers run concurrently on the same seed_data. With no producers
+        # in a bucket, that pass is a no-op — for every existing multi-policy
+        # example (none has a trainable Megatron-only policy), the standalone
+        # bucket is empty and the loop collapses to today's two-pass behavior,
+        # bit-identical.
+        #
         # producer_outputs[name] is the per-rank list (length = producer's
         # world_size), not a single collapsed dict — required so each
         # trainable rank gets its own producer rank's output (e.g. teacher
-        # rank r's teacher_log_probs lands at student rank r). Collapsing
-        # to "first non-empty" worked when DP=1 but silently broke alignment
+        # rank r's teacher_log_probs lands at student rank r). Collapsing to
+        # "first non-empty" worked when DP=1 but silently broke alignment
         # with DP>1 (student rank N would receive teacher rank 0's shard).
+        frozen_handles = [h for h in handles.values() if not h.config.trainable and h.train_group is not None]
+        trainable_standalone = [h for h in handles.values() if h.config.trainable and not has_sglang_engine(h.config)]
+        trainable_pair = [h for h in handles.values() if h.config.trainable and has_sglang_engine(h.config)]
+
+        # Resolve producer seed data: prefer the first paired policy's rollout
+        # slice (so producers see the same prompts the actor will train on),
+        # fall back to __shared__ for shared-buffer mode.
+        seed_name = trainable_pair[0].config.name if trainable_pair else None
+        seed_data = rollout_data.get(seed_name) if seed_name else None
+        if seed_data is None:
+            seed_data = rollout_data.get("__shared__")
+
         producer_outputs: dict[str, list[dict]] = {}
-        if frozen_handles:
-            seed_name = trainable_handles[0].config.name
-            seed_data = rollout_data.get(seed_name) or rollout_data.get("__shared__")
+        for producer_list, label in (
+            (frozen_handles, "frozen"),
+            (trainable_standalone, "trainable_standalone"),
+        ):
+            if not producer_list:
+                continue
             if seed_data is None:
                 logger.warning(
-                    f"frozen producers got no rollout data; skipping {[h.config.name for h in frozen_handles]}"
+                    f"{label} producers got no rollout data; skipping " f"{[h.config.name for h in producer_list]}"
                 )
-            else:
-                # Launch all frozen producers concurrently; preserve per-rank
-                # output so the trainable consumers can pull the right shard
-                # (PP>1: only the last-PP-rank entry is populated, rest are {};
-                # the consumer's actor.train ignores empty external_data).
-                per_policy_refs: dict[str, list] = {
-                    h.config.name: h.train_group.async_train(rollout_id, seed_data, external_data=None)
-                    for h in frozen_handles
-                }
-                for name, refs in per_policy_refs.items():
-                    producer_outputs[name] = ray.get(refs)
+                continue
+            # Launch all producers in this pass concurrently; preserve per-rank
+            # output so the trainable consumers can pull the right shard
+            # (PP>1: only the last-PP-rank entry is populated, rest are {};
+            # the consumer's actor.train ignores empty external_data).
+            per_policy_refs: dict[str, list] = {
+                h.config.name: h.train_group.async_train(rollout_id, seed_data, external_data=None)
+                for h in producer_list
+            }
+            for name, refs in per_policy_refs.items():
+                producer_outputs[name] = ray.get(refs)
 
-        # trainable consumers — parallel: each policy lives on its own GPU(s)
+        # Pass 3: trainable_pair — parallel: each policy lives on its own GPU(s)
         # under both colocate (M+S share one GPU) and no-colocate (separate
         # GPUs). Cross-policy concurrent train has disjoint NCCL groups,
         # disjoint optimizer state, and no shared mutable state — every actor
@@ -214,7 +230,7 @@ def train(args):
         # order under Megatron's default tp-cp-ep-dp-pp mesh) must equal
         # consumer.world_size.
         in_flight: list = []
-        for h in trainable_handles:
+        for h in trainable_pair:
             data = rollout_data.get(h.config.name) or rollout_data.get("__shared__")
             if data is None:
                 logger.warning(f"policy {h.config.name} got no rollout data")
@@ -277,7 +293,7 @@ def train(args):
         if args.offload_rollout:
             ray.get(rollout_manager.onload_weights.remote())
         for h in handles.values():
-            if h.config.trainable:
+            if h.config.trainable and has_sglang_engine(h.config):
                 h.train_group.update_weights()
         if args.offload_rollout:
             ray.get(rollout_manager.onload_kv.remote())

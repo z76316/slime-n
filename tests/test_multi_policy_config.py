@@ -123,6 +123,62 @@ class TestExampleConfig:
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# Shape predicates (has_sglang_engine, is_critic_shape)
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class TestShapePredicates:
+    """has_sglang_engine and is_critic_shape are part of the multi-policy
+    public contract: the driver / placement_group use them to partition by
+    shape (engine vs. no engine) and to flip PPO-critic-specific wiring."""
+
+    def test_has_sglang_engine_paired(self):
+        from slime.utils.policy_config import has_sglang_engine
+
+        assert has_sglang_engine(_minimal_actor(sglang_num_nodes=1))
+
+    def test_has_sglang_engine_standalone(self):
+        from slime.utils.policy_config import has_sglang_engine
+
+        assert not has_sglang_engine(_minimal_actor(sglang_num_nodes=0))
+
+    def test_has_sglang_engine_ignores_sglang_server_default(self):
+        # Parser sets sglang_server=name unconditionally even when
+        # sglang_num_nodes==0 — predicate must not rely on it.
+        from slime.utils.policy_config import has_sglang_engine
+
+        cfg = _minimal_actor(sglang_num_nodes=0, sglang_server="solver")
+        assert not has_sglang_engine(cfg)
+
+    def test_is_critic_shape_matches_trainable_megatron_only_ppo(self):
+        from slime.utils.policy_config import is_critic_shape
+
+        cfg = _minimal_actor(trainable=True, sglang_num_nodes=0, advantage_estimator="ppo")
+        assert is_critic_shape(cfg)
+
+    def test_is_critic_shape_requires_trainable(self):
+        from slime.utils.policy_config import is_critic_shape
+
+        # Frozen OPD-Megatron teacher: trainable=False, sglang_num_nodes=0, grpo.
+        cfg = _minimal_actor(trainable=False, sglang_num_nodes=0, advantage_estimator="ppo")
+        assert not is_critic_shape(cfg)
+
+    def test_is_critic_shape_requires_no_engine(self):
+        from slime.utils.policy_config import is_critic_shape
+
+        # Paired PPO actor — has an engine, not a critic.
+        cfg = _minimal_actor(trainable=True, sglang_num_nodes=1, advantage_estimator="ppo")
+        assert not is_critic_shape(cfg)
+
+    def test_is_critic_shape_requires_ppo(self):
+        from slime.utils.policy_config import is_critic_shape
+
+        # GRPO trainable Megatron-only policy is NOT a critic.
+        cfg = _minimal_actor(trainable=True, sglang_num_nodes=0, advantage_estimator="grpo")
+        assert not is_critic_shape(cfg)
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # Per-entry validator
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -131,19 +187,20 @@ class TestValidatePolicyConfig:
     def test_minimal_actor_passes(self):
         validate_policy_config(_minimal_actor())  # no raise
 
-    def test_critic_role_rejected(self):
+    def test_critic_role_accepted(self):
+        # Critic role is supported alongside actor since the multi-policy PPO
+        # example landed (asymmetric actor + critic).
         cfg = _minimal_actor(role="critic")
-        with pytest.raises(ValueError, match="only role='actor'"):
-            validate_policy_config(cfg)
+        validate_policy_config(cfg)  # no raise
 
     def test_unknown_role_rejected(self):
         cfg = _minimal_actor(role="wizard")
-        with pytest.raises(ValueError, match="only role='actor'"):
+        with pytest.raises(ValueError, match="role must be 'actor' or 'critic'"):
             validate_policy_config(cfg)
 
     def test_missing_sglang_server_rejected(self):
         cfg = _minimal_actor(sglang_server=None)
-        with pytest.raises(ValueError, match="actor requires sglang_server"):
+        with pytest.raises(ValueError, match="policy requires sglang_server"):
             validate_policy_config(cfg)
 
     def test_missing_hf_checkpoint_rejected(self):
@@ -1157,15 +1214,18 @@ class TestPolicyHandleDataclass:
         assert handle.config.name == "solver"
         assert handle.args.policy_name == "solver"
 
-    def test_three_fields_only(self):
-        """Schema check: PolicyHandle has exactly {config, args, train_group}.
-        Adding/removing fields is a deliberate API change — fail this test on drift."""
+    def test_field_set(self):
+        """Schema check: PolicyHandle has exactly {config, args, train_group, role_eff}.
+        Adding/removing fields is a deliberate API change — fail this test on drift.
+        role_eff was added for the multi-policy PPO example so the runtime role
+        (which can differ from cfg.role for shape-derived critics) flows from
+        create_training_models_multi through to async_init."""
         import dataclasses
 
         from slime.utils.policy_config import PolicyHandle
 
         names = {f.name for f in dataclasses.fields(PolicyHandle)}
-        assert names == {"config", "args", "train_group"}
+        assert names == {"config", "args", "train_group", "role_eff"}
 
     def test_mutable_dataclass(self):
         """PolicyHandle is intentionally mutable — driver code may swap train_group
