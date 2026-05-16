@@ -286,7 +286,12 @@ def create_training_models_multi(args, pgs, rollout_manager, policy_configs):
 
     Returns dict[name, PolicyHandle].
     """
-    from slime.utils.policy_config import PolicyHandle, config_to_namespace
+    from slime.utils.policy_config import PolicyHandle, config_to_namespace, has_sglang_engine, is_critic_shape
+
+    # Precompute once: any PPO critic in the run? Used to flip use_critic on the
+    # sibling actor's args BEFORE register_policy snapshots the namespace into
+    # the rollout manager.
+    has_critic = any(is_critic_shape(c) for c in policy_configs)
 
     # ── Build N RayTrainGroups + register each with the rollout manager ──
     handles: dict[str, PolicyHandle] = {}
@@ -295,20 +300,38 @@ def create_training_models_multi(args, pgs, rollout_manager, policy_configs):
         args_p = config_to_namespace(cfg, args)
         args_p.actor_gpu_offset = actor_gpu_offset
         actor_gpu_offset += cfg.megatron_num_nodes * cfg.num_gpus_per_node
+
+        # Cross-policy use_critic flip: actor's args must report use_critic=True
+        # before register_policy serializes args_p into the rollout manager
+        # (rollout.py stores into self._policy_args). A post-loop flip would
+        # leave a stale snapshot.
+        if has_critic and cfg.role == "actor" and not is_critic_shape(cfg):
+            args_p.use_critic = True
+
+        # Effective role passed to Ray init. For shape-derived critic this is
+        # "critic" — the value model_provider/actor.__init__ check to attach a
+        # value head and skip weight_updater. cfg.role itself is left intact
+        # for logs/saves.
+        role_eff = "critic" if is_critic_shape(cfg) else cfg.role
+
         train_group = allocate_train_group(
             args=args_p,
             num_nodes=cfg.megatron_num_nodes,
             num_gpus_per_node=cfg.num_gpus_per_node,
             pg=pgs[cfg.name],
-            role=cfg.role,
+            role=role_eff,
         )
-        handles[cfg.name] = PolicyHandle(config=cfg, args=args_p, train_group=train_group)
-        # Frozen producers (e.g. OPD Megatron teacher) have no paired SGLang
-        # engine — register_policy would fail at _get_server. The downstream
-        # weight-push path is also gated on cfg.trainable in train_multi_policy.py
-        # and via the defensive early-return in actor.update_weights, so the
-        # frozen actor never tries to look up its engine.
-        if cfg.trainable:
+        handles[cfg.name] = PolicyHandle(
+            config=cfg,
+            args=args_p,
+            train_group=train_group,
+            role_eff=role_eff,
+        )
+        # Skip register_policy when the policy hosts no SGLang engine. Covers
+        # both frozen Megatron producers (OPD teacher) and PPO critics. Note:
+        # cfg.sglang_server is set by the parser unconditionally, so it cannot
+        # be used as the "no engine" predicate — use has_sglang_engine.
+        if cfg.trainable and has_sglang_engine(cfg):
             ray.get(rollout_manager.register_policy.remote(cfg.name, cfg.sglang_server, args_p))
 
     # ── async_init each + reconcile start_rollout_ids across policies ──
@@ -319,7 +342,7 @@ def create_training_models_multi(args, pgs, rollout_manager, policy_configs):
         ids = ray.get(
             h.train_group.async_init(
                 h.args,
-                role=h.config.role,
+                role=h.role_eff,
                 with_ref=h.args.kl_coef != 0 or h.args.use_kl_loss,
                 with_opd_teacher=getattr(h.args, "use_opd", False) and getattr(h.args, "opd_type", None) == "megatron",
             )
