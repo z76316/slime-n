@@ -677,8 +677,11 @@ class TestParserEdgeCases:
         assert len(cfgs) == 1
         assert not hasattr(cfgs[0], "wizardly_field")
 
-    def test_unknown_megatron_field_rejected(self):
-        # Fields inside megatron: are **-spread into PolicyConfig — unknowns raise TypeError.
+    def test_unknown_megatron_field_routed_to_extras(self):
+        # Behavior change: unknown keys in megatron: now flow to
+        # extra_megatron_args (per-policy MODEL_ARGS override) instead of
+        # raising TypeError. Lets heterogeneous-architecture multi-policy
+        # configs declare num_layers / num_experts / etc. per policy.
         path = _write_yaml(
             {
                 "policies": [
@@ -699,8 +702,8 @@ class TestParserEdgeCases:
                 ]
             }
         )
-        with pytest.raises(TypeError):
-            parse_policy_configs(path)
+        cfgs = parse_policy_configs(path)
+        assert cfgs[0].extra_megatron_args == {"wizardly_field": True}
 
     def test_megatron_block_optional(self):
         # If megatron: is missing, all megatron fields use PolicyConfig defaults
@@ -1422,6 +1425,165 @@ class TestPerPolicyDerivedDefaults:
         cfg = _minimal_actor(use_dynamic_batch_size=False, max_tokens_per_gpu=8192, log_probs_max_tokens_per_gpu=None)
         ns = config_to_namespace(cfg, self._ns())
         assert ns.log_probs_max_tokens_per_gpu is None
+
+
+class TestExtraMegatronArgs:
+    """Coverage for per-policy MODEL_ARGS overrides via extra_megatron_args.
+
+    Unknown keys in the YAML `megatron:` block (e.g. num_layers, hidden_size,
+    num_experts) are collected into PolicyConfig.extra_megatron_args and
+    setattr-ed onto the per-policy ns by config_to_namespace. This lets an
+    N-policy run host policies with different architectures (e.g. a dense
+    student + a MoE teacher) — needed for OPD-Megatron with heterogeneous
+    teacher/student.
+    """
+
+    def _base_args(self, **kw):
+        from argparse import Namespace
+
+        defaults = dict(
+            colocate=True,
+            num_rollout=100,
+            rollout_batch_size=32,
+            offload_train=False,
+            offload_rollout=False,
+            check_weight_update_equal=False,
+            use_fault_tolerance=False,
+            save_interval=20,
+            eval_interval=None,
+            skip_eval_before_train=False,
+            rollout_global_dataset=False,
+            start_rollout_id=None,
+            # Mimic CLI MODEL_ARGS having pushed a dense student architecture
+            # onto base_args; per-policy extras should override these.
+            num_layers=28,
+            hidden_size=1024,
+            num_experts=None,
+        )
+        defaults.update(kw)
+        return Namespace(**defaults)
+
+    # ── parser splits known vs unknown megatron keys ──
+    def test_parser_routes_unknown_keys_to_extras(self):
+        yaml_data = {
+            "policies": [
+                {
+                    "name": "teacher",
+                    "hf_checkpoint": "/x",
+                    "trainable": False,
+                    "num_gpus_per_node": 1,
+                    "megatron_num_nodes": 1,
+                    "sglang_num_nodes": 0,
+                    "megatron": {
+                        "tensor_model_parallel_size": 8,  # known field
+                        "num_layers": 48,  # unknown -> extras
+                        "hidden_size": 2048,  # unknown -> extras
+                        "num_experts": 128,  # unknown -> extras
+                    },
+                }
+            ]
+        }
+        path = _write_yaml(yaml_data)
+        try:
+            cfgs = parse_policy_configs(path)
+        finally:
+            os.unlink(path)
+        teacher = cfgs[0]
+        assert teacher.tensor_model_parallel_size == 8  # known field flattened normally
+        assert teacher.extra_megatron_args == {"num_layers": 48, "hidden_size": 2048, "num_experts": 128}
+
+    def test_parser_extras_is_none_when_no_unknown_keys(self):
+        # Backward compat: existing configs with only known keys should leave
+        # extra_megatron_args as None (parity with pre-change behavior).
+        yaml_data = {
+            "policies": [
+                {
+                    "name": "student",
+                    "hf_checkpoint": "/x",
+                    "num_gpus_per_node": 1,
+                    "megatron_num_nodes": 1,
+                    "sglang_num_nodes": 1,
+                    "megatron": {"tensor_model_parallel_size": 1, "lr": 1e-6},
+                    "sglang": {
+                        "update_weights": True,
+                        "num_gpus_per_engine": 1,
+                        "server_groups": [{"worker_type": "regular", "num_gpus": 1}],
+                    },
+                }
+            ]
+        }
+        path = _write_yaml(yaml_data)
+        try:
+            cfgs = parse_policy_configs(path)
+        finally:
+            os.unlink(path)
+        assert cfgs[0].extra_megatron_args is None
+
+    # ── config_to_namespace applies extras ──
+    def test_config_to_namespace_applies_extras(self):
+        from slime.utils.policy_config import config_to_namespace
+
+        cfg = _minimal_actor(extra_megatron_args={"num_layers": 48, "hidden_size": 2048, "num_experts": 128})
+        ns = config_to_namespace(cfg, self._base_args())
+        assert ns.num_layers == 48  # overrides base_args's 28
+        assert ns.hidden_size == 2048  # overrides base_args's 1024
+        assert ns.num_experts == 128  # overrides base_args's None
+
+    def test_config_to_namespace_extras_none_is_noop(self):
+        # When extra_megatron_args is None, ns keeps base_args's architecture
+        # values (the trainable student's path: takes architecture from CLI
+        # MODEL_ARGS, no per-policy overrides needed).
+        from slime.utils.policy_config import config_to_namespace
+
+        cfg = _minimal_actor(extra_megatron_args=None)
+        ns = config_to_namespace(cfg, self._base_args())
+        assert ns.num_layers == 28  # unchanged from base_args
+        assert ns.hidden_size == 1024  # unchanged
+
+    def test_two_policies_can_have_different_architectures(self):
+        # End-to-end: build a config with a small dense student + a large MoE
+        # teacher, parse it, project each PolicyConfig to its own namespace,
+        # confirm each ns has the right per-policy architecture.
+        from slime.utils.policy_config import config_to_namespace
+
+        yaml_data = {
+            "policies": [
+                {
+                    "name": "student",
+                    "hf_checkpoint": "/x",
+                    "num_gpus_per_node": 1,
+                    "megatron_num_nodes": 1,
+                    "sglang_num_nodes": 1,
+                    "megatron": {"num_layers": 28, "hidden_size": 1024},
+                    "sglang": {
+                        "update_weights": True,
+                        "num_gpus_per_engine": 1,
+                        "server_groups": [{"worker_type": "regular", "num_gpus": 1}],
+                    },
+                },
+                {
+                    "name": "teacher",
+                    "hf_checkpoint": "/y",
+                    "trainable": False,
+                    "num_gpus_per_node": 1,
+                    "megatron_num_nodes": 1,
+                    "sglang_num_nodes": 0,
+                    "megatron": {"num_layers": 48, "hidden_size": 2048, "num_experts": 128},
+                },
+            ]
+        }
+        path = _write_yaml(yaml_data)
+        try:
+            cfgs = parse_policy_configs(path)
+        finally:
+            os.unlink(path)
+        student_ns = config_to_namespace(cfgs[0], self._base_args())
+        teacher_ns = config_to_namespace(cfgs[1], self._base_args())
+        assert student_ns.num_layers == 28
+        assert student_ns.hidden_size == 1024
+        assert teacher_ns.num_layers == 48
+        assert teacher_ns.hidden_size == 2048
+        assert teacher_ns.num_experts == 128
 
 
 class TestFrozenSglangEnginePolicyShape:
