@@ -121,8 +121,7 @@ def _parse_sh_model_args(path: str) -> dict:
             result[key] = False if is_store_false else True
         elif is_store_false:
             raise ValueError(
-                f"{path}: store_false flag {tok!r} got a value {values!r}; "
-                "`--no-X` flags don't take arguments."
+                f"{path}: store_false flag {tok!r} got a value {values!r}; " "`--no-X` flags don't take arguments."
             )
         elif len(values) == 1:
             result[key] = values[0]
@@ -180,10 +179,7 @@ def _validate_hf_per_policy(policy_args) -> None:
         return
     from transformers import AutoConfig
 
-    from slime.backends.megatron_utils.arguments import (
-        _hf_validate_args,
-        _validate_allgather_cp_supported,
-    )
+    from slime.backends.megatron_utils.arguments import _hf_validate_args, _validate_allgather_cp_supported
 
     hf_config = AutoConfig.from_pretrained(policy_args.hf_checkpoint, trust_remote_code=True)
     _hf_validate_args(policy_args, hf_config)
@@ -205,7 +201,7 @@ def populate_rollout_arch_fields(base_args, policy_configs, all_policy_args) -> 
     """
     engine_archs = {
         getattr(pa, "num_layers", None)
-        for cfg, pa in zip(policy_configs, all_policy_args)
+        for cfg, pa in zip(policy_configs, all_policy_args, strict=True)
         if has_sglang_engine(cfg) and getattr(pa, "num_layers", None) is not None
     }
     if getattr(base_args, "use_rollout_routing_replay", False) and len(engine_archs) > 1:
@@ -225,9 +221,7 @@ def _load_model_sh(path: str) -> dict:
 
     sh_path = path if os.path.isabs(path) else os.path.join(_repo_root(), path)
     if not os.path.exists(sh_path):
-        raise FileNotFoundError(
-            f"model_args_path: {sh_path!r} not found (from {path!r})."
-        )
+        raise FileNotFoundError(f"model_args_path: {sh_path!r} not found (from {path!r}).")
     return _parse_sh_model_args(sh_path)
 
 
@@ -696,9 +690,7 @@ def config_to_namespace(cfg: PolicyConfig, base_args):
     # becomes a no-op on the validation step in that environment.
     if cfg.megatron_num_nodes > 0:
         try:
-            from slime.backends.megatron_utils.arguments import (
-                validate_args as megatron_validate_args,
-            )
+            from slime.backends.megatron_utils.arguments import validate_args as megatron_validate_args
         except ModuleNotFoundError:
             megatron_validate_args = None
         if megatron_validate_args is not None:

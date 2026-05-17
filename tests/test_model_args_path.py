@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import tempfile
 
 import pytest
 import yaml
@@ -60,7 +59,7 @@ def test_parse_sh_kebab_to_snake_and_numeric_coercion(tmp_path):
     sh = _write(
         tmp_path,
         "m.sh",
-        'MODEL_ARGS=(\n  --num-layers 28\n  --hidden-size 2048\n  --norm-epsilon 1e-6\n)\n',
+        "MODEL_ARGS=(\n  --num-layers 28\n  --hidden-size 2048\n  --norm-epsilon 1e-6\n)\n",
     )
     out = _parse_sh_model_args(sh)
     assert out == {"num_layers": 28, "hidden_size": 2048, "norm_epsilon": 1e-6}
