@@ -2,8 +2,8 @@
 
 # Multi-policy PPO — asymmetric actor + critic.
 #
-#   actor   : trainable, paired Megatron + SGLang (m✓ s✓), Qwen3-1.7B
-#   critic  : trainable, standalone Megatron (m✓ s✗), Qwen3-0.6B
+#   actor   : trainable, paired Megatron + SGLang, Qwen3-1.7B
+#   critic  : trainable, standalone Megatron, Qwen3-0.6B
 #             Runs train_critic (forward + value-loss + backward), returns
 #             per-token `values` as external_data for the actor.
 #
@@ -33,12 +33,13 @@ fi
 echo "HAS_NVLINK: $HAS_NVLINK (detected $NVLINK_COUNT NVLink references)"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-# CLI-global MODEL_ARGS is sourced from the *actor* (Qwen3-1.7B). Per-policy
-# arch overrides for the critic (Qwen3-0.6B) live in config.yaml's
-# `extra_megatron_args` (auto-captured from the `megatron:` YAML block) —
-# config_to_namespace projects them onto the
-# critic's per-policy args namespace after CLI parse.
-source "${SCRIPT_DIR}/../../scripts/models/qwen3-1.7B.sh"
+# No bash `source ...sh` and no `${MODEL_ARGS[@]}` interpolation. Per-policy
+# arch comes from each policy's `megatron.model_args_path` inside
+# config.yaml; train_multi_policy.py's parse_multi_policy_args() loads each
+# referenced .sh, projects MODEL_ARGS onto the policy's args namespace,
+# and runs Megatron + HF validation per policy after the projection.
+# Actor sees Qwen3-1.7B arch, critic sees Qwen3-0.6B arch — no bash-side
+# coupling. See plan_model_field.md for the parse-flow contract.
 
 ROLLOUT_ARGS=(
    --prompt-data /root/dapo-math-17k/dapo-math-17k.jsonl
@@ -91,7 +92,6 @@ RUNTIME_ENV_JSON="{
 ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
    -- python3 train_multi_policy.py \
-   ${MODEL_ARGS[@]} \
    ${TRAIN_ARGS[@]} \
    ${ROLLOUT_ARGS[@]} \
    ${WANDB_ARGS[@]} \

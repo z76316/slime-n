@@ -40,6 +40,197 @@ import yaml
 logger = logging.getLogger(__name__)
 
 
+# Flags whose argparse nargs is >1 in upstream Megatron. Anything not in
+# this allowlist is treated as scalar; passing >1 value to a scalar flag
+# is a user typo (e.g. `--num-layers 28 29`) and raises.
+_MULTI_VALUE_FLAGS: frozenset[str] = frozenset({"spec"})
+
+
+def _repo_root() -> str:
+    import os
+
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _extract_model_args_tokens(path: str) -> list[str]:
+    """Extract MODEL_ARGS=(...) body from a .sh file as a token list.
+
+    Substitutes `${VAR:-default}` → literal default (env IGNORED). Rejects
+    any other bash interpolation (`${VAR}`, `$(cmd)`, bare `$VAR`,
+    arithmetic, etc.) with a clear error pointing at the offending line.
+    """
+    import re
+    import shlex
+
+    with open(path) as f:
+        text = f.read()
+    m = re.search(r"MODEL_ARGS=\(\s*(.*?)\s*\)", text, re.DOTALL)
+    if not m:
+        raise ValueError(f"{path}: no MODEL_ARGS=( ... ) array found")
+    body = m.group(1)
+
+    _interp_default = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*:-([^}]*)\}")
+    _bare_shell_var = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*")
+    cleaned: list[str] = []
+    for ln in body.splitlines():
+        ln = ln.split("#", 1)[0].strip()
+        if not ln:
+            continue
+        ln = _interp_default.sub(r"\1", ln)
+        if "${" in ln or "$(" in ln or _bare_shell_var.search(ln):
+            raise ValueError(
+                f"{path}: unsupported bash interpolation in `{ln}`; "
+                "only ${VAR:-default} is supported. Override the field "
+                "inline in the policy's megatron: block if needed."
+            )
+        cleaned.append(ln)
+    return shlex.split(" ".join(cleaned))
+
+
+def _parse_sh_model_args(path: str) -> dict:
+    """Parse a MODEL_ARGS=( ... ) bash array into a snake_case-keyed dict.
+
+    See plan_model_field.md "Bash → dict translation rules" for the full
+    contract. Coerces numbers (int, float), keeps strings otherwise.
+    `--no-foo` maps to `foo: False` (Megatron store_false convention).
+    """
+    tokens = _extract_model_args_tokens(path)
+
+    def _coerce(raw: str):
+        for caster in (int, float):
+            try:
+                return caster(raw)
+            except ValueError:
+                continue
+        return raw
+
+    result: dict = {}
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if not tok.startswith("--"):
+            raise ValueError(f"{path}: unexpected token {tok!r} at MODEL_ARGS[{i}]")
+        is_store_false = tok.startswith("--no-")
+        raw_name = tok[5:] if is_store_false else tok[2:]
+        key = raw_name.replace("-", "_")
+        j = i + 1
+        while j < len(tokens) and not tokens[j].startswith("--"):
+            j += 1
+        values = [_coerce(v) for v in tokens[i + 1 : j]]
+        if not values:
+            result[key] = False if is_store_false else True
+        elif is_store_false:
+            raise ValueError(
+                f"{path}: store_false flag {tok!r} got a value {values!r}; "
+                "`--no-X` flags don't take arguments."
+            )
+        elif len(values) == 1:
+            result[key] = values[0]
+        else:
+            if key not in _MULTI_VALUE_FLAGS:
+                raise ValueError(
+                    f"{path}: flag {tok!r} got {len(values)} values "
+                    f"{values!r} but is not in the multi-value allowlist "
+                    f"({sorted(_MULTI_VALUE_FLAGS)})."
+                )
+            result[key] = values
+        i = j
+    return result
+
+
+def _apply_megatron_defaults(policy_args, cfg) -> None:
+    """Re-derive Megatron defaults on a per-policy namespace.
+
+    `set_default_megatron_args` only fills `padded_vocab_size` when it's
+    currently None — so if `base_args` already had a `padded_vocab_size`
+    (e.g. from a legacy sourced MODEL_ARGS) and the policy overrides
+    `vocab_size`, the stale value would survive. Clear it first.
+
+    `set_default_megatron_args` also has unconditional writes (e.g.
+    `args.max_position_embeddings = args.seq_length`) that would clobber
+    user-explicit values in extras. Re-apply extras AFTER defaulting so
+    user-explicit values always win.
+    """
+    try:
+        from slime.backends.megatron_utils.arguments import set_default_megatron_args
+    except ModuleNotFoundError:
+        # Megatron isn't installed (tests run on the slime-n config plumbing
+        # without the full backend). The defaulting helper is a no-op in
+        # that environment — extras still get applied directly.
+        set_default_megatron_args = None
+
+    extras = cfg.extra_megatron_args or {}
+    vocab_inputs_overridden = "vocab_size" in extras or "make_vocab_size_divisible_by" in extras
+    if vocab_inputs_overridden and "padded_vocab_size" not in extras:
+        policy_args.padded_vocab_size = None
+    if set_default_megatron_args is not None:
+        set_default_megatron_args(policy_args)
+    for k, v in extras.items():
+        setattr(policy_args, k, v)
+
+
+def _validate_hf_per_policy(policy_args) -> None:
+    """Re-run HF + allgather-CP validators against the policy's hf_checkpoint.
+
+    Mirrors what `megatron_parse_args` does at parse time, but per-policy
+    so each Megatron actor's arch is checked against its own HF config.
+    Skips when `hf_checkpoint` is empty.
+    """
+    if not getattr(policy_args, "hf_checkpoint", None):
+        return
+    from transformers import AutoConfig
+
+    from slime.backends.megatron_utils.arguments import (
+        _hf_validate_args,
+        _validate_allgather_cp_supported,
+    )
+
+    hf_config = AutoConfig.from_pretrained(policy_args.hf_checkpoint, trust_remote_code=True)
+    _hf_validate_args(policy_args, hf_config)
+    _validate_allgather_cp_supported(policy_args, hf_config)
+
+
+def populate_rollout_arch_fields(base_args, policy_configs, all_policy_args) -> None:
+    """Populate Megatron arch fields read by the rollout code path.
+
+    `sglang_rollout.py` reads `args.num_layers` for routed-expert reshape
+    (gated on `use_rollout_routing_replay`). After the multi-policy
+    parse-flow refactor, `base_args.num_layers` is None until something
+    sets it. Compute the set of `num_layers` values across
+    engine-hosting policies only — standalone-Megatron policies (e.g.
+    PPO critic) never produce rollout tokens.
+
+    Raises if `use_rollout_routing_replay` is True and engine-hosting
+    policies disagree on `num_layers`.
+    """
+    engine_archs = {
+        getattr(pa, "num_layers", None)
+        for cfg, pa in zip(policy_configs, all_policy_args)
+        if has_sglang_engine(cfg) and getattr(pa, "num_layers", None) is not None
+    }
+    if getattr(base_args, "use_rollout_routing_replay", False) and len(engine_archs) > 1:
+        raise ValueError(
+            "mixed-arch + routed-expert rollout not supported in v1: "
+            f"engine-hosting policies disagree on num_layers ({sorted(engine_archs)}). "
+            "Either disable use_rollout_routing_replay or align num_layers across "
+            "engine-hosting policies."
+        )
+    if len(engine_archs) == 1:
+        base_args.num_layers = next(iter(engine_archs))
+
+
+def _load_model_sh(path: str) -> dict:
+    """Resolve `path` (relative to repo root or absolute), then parse it."""
+    import os
+
+    sh_path = path if os.path.isabs(path) else os.path.join(_repo_root(), path)
+    if not os.path.exists(sh_path):
+        raise FileNotFoundError(
+            f"model_args_path: {sh_path!r} not found (from {path!r})."
+        )
+    return _parse_sh_model_args(sh_path)
+
+
 @dataclasses.dataclass
 class PolicyConfig:
     # ── identity ──
@@ -147,12 +338,24 @@ class PolicyConfig:
 
     # ── per-policy Megatron flag overrides (architecture, etc.) ──
     # Catches any key in the YAML `megatron:` block that is not a declared
-    # PolicyConfig field. config_to_namespace applies each as setattr on the
-    # per-policy ns, so a YAML key like `num_layers: 48` overrides whatever
-    # came from the global CLI MODEL_ARGS. Needed when N policies in one run
-    # don't share architecture (e.g. small student + large MoE teacher, or
-    # the asymmetric PPO actor + critic example).
+    # PolicyConfig field, plus any extras loaded from `model_args_path`.
+    # config_to_namespace applies each as setattr on the per-policy ns, so a
+    # YAML key like `num_layers: 48` (or one loaded from a .sh) overrides
+    # whatever came from the global CLI MODEL_ARGS. Needed when N policies
+    # in one run don't share architecture.
     extra_megatron_args: dict | None = None
+
+    # ── model args file reference ──
+    # Path to an upstream `scripts/models/<name>.sh` (the bash
+    # `MODEL_ARGS=(...)` array). When set, the parser reads the .sh,
+    # converts kebab→snake, and merges parsed flags UNDER any inline
+    # `megatron:` block values (inline wins). Path is resolved relative to
+    # the slime-n repo root; absolute paths also accepted. Lets multiple
+    # policies reference the same arch without bash sourcing in the run
+    # script. Note: only `${VAR:-default}` interpolation is supported
+    # (literal default is used; env var is IGNORED); `${VAR}`, `$(cmd)`,
+    # and bare `$VAR` are rejected.
+    model_args_path: str | None = None
 
 
 def has_sglang_engine(cfg: PolicyConfig) -> bool:
@@ -227,6 +430,19 @@ def parse_policy_configs(config_path: str) -> list[PolicyConfig]:
         megatron_block = entry.get("megatron") or {}
         megatron_known = {k: v for k, v in megatron_block.items() if k in known_field_names}
         megatron_extras = {k: v for k, v in megatron_block.items() if k not in known_field_names}
+
+        # When megatron.model_args_path is set, load the .sh and merge its
+        # parsed flags UNDER the inline `megatron:` block. Real upstream
+        # files contain legitimate PolicyConfig fields (e.g.
+        # --sequence-parallel in gpt-oss-20B.sh), so split into the same
+        # two buckets as the inline block; inline always wins on conflict.
+        model_args_path = megatron_known.get("model_args_path")
+        if model_args_path:
+            parsed = _load_model_sh(model_args_path)
+            parsed_known = {k: v for k, v in parsed.items() if k in known_field_names}
+            parsed_extras = {k: v for k, v in parsed.items() if k not in known_field_names}
+            megatron_known = {**parsed_known, **megatron_known}
+            megatron_extras = {**parsed_extras, **megatron_extras}
 
         flat: dict[str, Any] = {
             "name": entry["name"],
@@ -460,6 +676,34 @@ def config_to_namespace(cfg: PolicyConfig, base_args):
             if getattr(ns, "ref_ckpt_step", None) is not None:
                 ns.ckpt_step = ns.ref_ckpt_step
             ns.start_rollout_id = 0
+
+    # Re-derive Megatron defaults whose inputs the policy may have
+    # overridden (e.g. padded_vocab_size when vocab_size changed). Runs
+    # last so it sees the final extras-projected values.
+    _apply_megatron_defaults(ns, cfg)
+
+    # For Megatron-hosting policies, run HF + structural validation on
+    # this namespace. Both validators are pure functions of `ns`, so
+    # running them inside `config_to_namespace` means every caller
+    # (parse_multi_policy_args pre-flight, placement_group actor build,
+    # megatron-less placeholder for SGLang-only policies — skipped via
+    # the gate below) sees the validator's in-place mutations
+    # (variable_seq_lengths=True, moe_token_dispatcher_type rewrites,
+    # ...). Replaces the prior policy_args_by_name pass-through scheme.
+    #
+    # Gated on Megatron being importable so config-layer unit tests
+    # (no Megatron backend installed) still work — config_to_namespace
+    # becomes a no-op on the validation step in that environment.
+    if cfg.megatron_num_nodes > 0:
+        try:
+            from slime.backends.megatron_utils.arguments import (
+                validate_args as megatron_validate_args,
+            )
+        except ModuleNotFoundError:
+            megatron_validate_args = None
+        if megatron_validate_args is not None:
+            _validate_hf_per_policy(ns)
+            megatron_validate_args(ns)
 
     return ns
 

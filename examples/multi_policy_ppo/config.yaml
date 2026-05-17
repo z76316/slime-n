@@ -1,48 +1,28 @@
 # Multi-policy PPO — asymmetric actor + critic.
 #
-# Pattern: trainable actor paired with its own SGLang engine, plus a trainable
-# standalone Megatron critic (no engine) that runs train_critic (forward +
-# value-loss + backward) and feeds per-token `values` to the actor via
-# external_data.
+# actor   : trainable, paired Megatron + SGLang, Qwen3-1.7B
+# critic  : trainable, standalone Megatron (no engine), Qwen3-0.6B,
+#           advantage_estimator=ppo → shape-derived role=critic
 #
-#   actor   (m✓ s✓ trainable=true, advantage_estimator=ppo)
-#   critic  (m✓ s✗ trainable=true, advantage_estimator=ppo) — shape-derived
-#                                                              role=critic
+# Each policy declares its architecture via `megatron.model_args_path`,
+# which points at an upstream `scripts/models/<name>.sh` `MODEL_ARGS=(...)`
+# array. The parser loads each .sh per policy, so actor and critic can have
+# independent arch — the thing legacy single-policy PPO (one global
+# MODEL_ARGS) cannot express. See README.md for the runtime walkthrough.
 #
-# Asymmetric architecture is the example's reason to exist: actor = Qwen3-1.7B,
-# critic = Qwen3-0.6B. Legacy single-policy PPO (`train.py + --critic-config-path`)
-# ties actor and critic to the same MODEL_ARGS; multi-policy lifts that via
-# per-policy `extra_megatron_args` (auto-captured from the `megatron:` YAML block).
-#
-# Data path (per rollout):
-#   critic.train_critic  ──→  {"values": [...]}
-#                                │
-#                                ▼ external_data
-#   actor.train_actor    merges into rollout_data["values"] (actor.py:509-515)
-#                                │
-#                                ▼
-#   compute_advantages_and_returns → PPO advantage / value-loss for actor
-#
-# Cluster sizing (no --colocate):
-#   actor_gpus   = sum(megatron_num_nodes * num_gpus_per_node) = 2 × 1 × 1 = 2
-#                  (actor + critic both have a Megatron actor)
-#   rollout_gpus = sum(sglang_num_nodes   * num_gpus_per_node) = 1 × 1 × 1 = 1
-#                  (only actor has a paired engine; critic.sglang_num_nodes = 0)
-#   total        = actor_gpus + rollout_gpus                   = 3
-#
-# Layout: GPU 0 = actor Megatron, GPU 1 = critic Megatron, GPU 2 = actor SGLang.
+# Cluster (no --colocate): 3 GPUs total
+#   GPU 0: actor Megatron
+#   GPU 1: critic Megatron
+#   GPU 2: actor SGLang
 
 policies:
 
-  # ─── actor — trainable, paired pipeline (Qwen3-1.7B) ────────────────────
+  # ─── actor (Qwen3-1.7B) ─────────────────────────────────────────────────
   - name: actor
     role: actor
-
     trainable: true
-
     hf_checkpoint: /root/Qwen3-1.7B
     save: /ckpt/multi_policy_ppo/qwen3-1.7B/actor
-
     buffer_mode: split
 
     num_gpus_per_node: 1
@@ -50,6 +30,12 @@ policies:
     sglang_num_nodes: 1
 
     megatron:
+      # Architecture comes from this .sh. Parser extracts MODEL_ARGS=(...),
+      # converts kebab→snake (e.g. `--num-layers 28` → num_layers: 28),
+      # and merges keys into the policy's args namespace UNDER any inline
+      # overrides in this block.
+      model_args_path: scripts/models/qwen3-1.7B.sh
+
       megatron_to_hf_mode: bridge
       tensor_model_parallel_size: 1
       pipeline_model_parallel_size: 1
@@ -91,21 +77,6 @@ policies:
       use_kl_loss: false
       kl_loss_coef: 0
 
-      # Per-policy Megatron arch — actor is Qwen3-1.7B. Unknown keys inside
-      # this `megatron:` block (anything not a declared PolicyConfig field)
-      # are auto-captured into PolicyConfig.extra_megatron_args by the
-      # parser and projected onto the per-policy args namespace, overriding
-      # CLI-global MODEL_ARGS. CLI MODEL_ARGS is set to the actor's arch
-      # by the run script, so for the actor this is symmetric with the
-      # critic's block below.
-      num_layers: 28
-      hidden_size: 2048
-      ffn_hidden_size: 6144
-      num_attention_heads: 16
-      num_query_groups: 8
-      kv_channels: 128
-      vocab_size: 151936
-
     sglang:
       update_weights: true
       num_gpus_per_engine: 1
@@ -121,19 +92,15 @@ policies:
         - worker_type: regular
           num_gpus: 1
 
-  # ─── critic — trainable, standalone Megatron (Qwen3-0.6B) ────────────────
+  # ─── critic (Qwen3-0.6B) ────────────────────────────────────────────────
+  # role: actor in YAML — placement_group.py flips role_eff="critic" via
+  # is_critic_shape (trainable + sglang_num_nodes==0 + advantage_estimator
+  # == "ppo"). YAML role is kept intact for logs/saves.
   - name: critic
-    # cfg.role left as "actor" — shape-derived critic detection in
-    # placement_group.py flips role_eff="critic" via _is_critic_shape (trainable
-    # + sglang_num_nodes==0 + advantage_estimator=="ppo"). The YAML-declared
-    # role is kept intact for logs/saves.
     role: actor
-
     trainable: true
-
     hf_checkpoint: /root/Qwen3-0.6B
     save: /ckpt/multi_policy_ppo/qwen3-1.7B/critic
-
     buffer_mode: split
 
     num_gpus_per_node: 1
@@ -141,6 +108,12 @@ policies:
     sglang_num_nodes: 0  # standalone — no engine
 
     megatron:
+      # Different arch from the actor. This is the case legacy single-policy
+      # PPO cannot express: one bash `source scripts/models/...sh` provides
+      # one global MODEL_ARGS for the whole run, so actor and critic would
+      # be stuck on the same arch.
+      model_args_path: scripts/models/qwen3-0.6B.sh
+
       megatron_to_hf_mode: bridge
       tensor_model_parallel_size: 1
       pipeline_model_parallel_size: 1
@@ -174,18 +147,6 @@ policies:
       overlap_cpu_optimizer_d2h_h2d: true
       use_precision_aware_optimizer: true
 
-      advantage_estimator: ppo  # required for shape detection
+      advantage_estimator: ppo  # required for shape detection (is_critic_shape)
       n_samples_per_prompt: 4
       eps_clip: 0.2
-
-      # Per-policy Megatron arch — critic is Qwen3-0.6B. Without these
-      # overrides, the critic would inherit the CLI-global MODEL_ARGS
-      # (actor's 1.7B arch) and the weight load would mismatch the smaller
-      # hf_checkpoint. Parser auto-captures these into extra_megatron_args.
-      num_layers: 28
-      hidden_size: 1024
-      ffn_hidden_size: 3072
-      num_attention_heads: 16
-      num_query_groups: 8
-      kv_channels: 128
-      vocab_size: 151936

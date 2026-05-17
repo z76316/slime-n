@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import logging
 
 import ray
@@ -12,7 +13,14 @@ from slime.ray.placement_group import (
 from slime.utils.arguments import parse_args
 from slime.utils.logging_utils import configure_logger, finish_tracking, init_tracking, update_tracking_open_metrics
 from slime.utils.misc import should_run_periodic_action
-from slime.utils.policy_config import build_sglang_config_from_policies, derive_cluster_sizing, parse_policy_configs
+from slime.utils.policy_config import (
+    build_sglang_config_from_policies,
+    config_to_namespace,
+    derive_cluster_sizing,
+    has_sglang_engine,
+    parse_policy_configs,
+    populate_rollout_arch_fields,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,13 +84,60 @@ def _set_multi_policy_global_defaults(args, policy_configs, actor_gpus: int, rol
     args.global_batch_size = policy_configs[0].global_batch_size
 
 
-def train(args):
+def _preparse_config() -> str:
+    """Extract --config path from sys.argv without touching the real parser.
+
+    Returns the path string or raises if absent — multi-policy requires it.
+    """
+    p = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    p.add_argument("--config", type=str, default=None)
+    ns, _ = p.parse_known_args()
+    if not ns.config:
+        raise ValueError("train_multi_policy.py requires --config <path>.yaml")
+    return ns.config
+
+
+def parse_multi_policy_args():
+    """Parse CLI + YAML for multi-policy training.
+
+    Returns (base_args, policy_configs). Per-policy validation (HF +
+    Megatron structural) is done inside `config_to_namespace` itself, so
+    every caller — the pre-flight pass below, the actor-construction
+    call in `placement_group.py`, and the megatron-less placeholder in
+    `train()` — gets a fully validated namespace. The pre-flight pass
+    here exists only to derive rollout arch fields from engine-hosting
+    policies (and to fail-fast on bad per-policy arch BEFORE Ray spawns
+    actors).
+    """
+    config_path = _preparse_config()
+    policy_configs = parse_policy_configs(config_path)
+
+    # Defer global Megatron structural / HF validation — arch is
+    # per-policy YAML, not global CLI. Per-policy validation happens
+    # inside `config_to_namespace`.
+    base_args = parse_args(skip_megatron_model_validation=True)
+
+    # Set multi-policy globals on base_args BEFORE building per-policy
+    # namespaces, since each namespace inherits fields from base_args.
+    actor_gpus, rollout_gpus, _ = derive_cluster_sizing(policy_configs, colocate=base_args.colocate)
+    _set_multi_policy_global_defaults(base_args, policy_configs, actor_gpus, rollout_gpus)
+
+    # Pre-flight build: validates each per-policy namespace (inside
+    # config_to_namespace) and surfaces num_layers etc. for the rollout
+    # arch derivation. The namespaces themselves are discarded —
+    # placement_group rebuilds via config_to_namespace at actor
+    # construction time, which validates again. Validators are pure
+    # functions of the namespace; double-run is cheap and removes the
+    # need to plumb a `policy_args_by_name` dict through.
+    all_policy_args = [config_to_namespace(cfg, base_args) for cfg in policy_configs]
+    populate_rollout_arch_fields(base_args, policy_configs, all_policy_args)
+
+    return base_args, policy_configs
+
+
+def train(args, policy_configs):
     configure_logger()
 
-    # parse the YAML config and validate v1 restrictions
-    if not getattr(args, "config", None):
-        raise ValueError("train_multi_policy.py requires --config <path>.yaml")
-    policy_configs = parse_policy_configs(args.config)
     n_trainable = sum(1 for cfg in policy_configs if cfg.trainable)
 
     if args.check_weight_update_equal and n_trainable > 1:
@@ -93,12 +148,10 @@ def train(args):
     if args.use_fault_tolerance and n_trainable > 1:
         raise ValueError("--use-fault-tolerance not supported with multiple policies in v1")
 
-    # derive cluster sizing and surface it on args for downstream code
-    actor_gpus, rollout_gpus, total_gpus = derive_cluster_sizing(policy_configs, colocate=args.colocate)
-    _set_multi_policy_global_defaults(args, policy_configs, actor_gpus, rollout_gpus)
+    # cluster sizing already populated by parse_multi_policy_args; log it.
     logger.info(
         f"cluster sizing (colocate={args.colocate}): "
-        f"actor_gpus={actor_gpus}, rollout_gpus={rollout_gpus}, total={total_gpus}"
+        f"actor_gpus={args.megatron_total_gpus}, rollout_gpus={args.rollout_num_gpus}"
     )
 
     # allocate per-policy actor slices + a rollout slice
@@ -123,7 +176,7 @@ def train(args):
     # in the train loop can find them.
     megatron_cfgs = [c for c in policy_configs if c.megatron_num_nodes > 0]
     handles = create_training_models_multi(args, pgs, rollout_manager, megatron_cfgs)
-    from slime.utils.policy_config import PolicyHandle, config_to_namespace
+    from slime.utils.policy_config import PolicyHandle
 
     for cfg in policy_configs:
         if cfg.megatron_num_nodes == 0:
@@ -132,8 +185,6 @@ def train(args):
     # Always push trainable actor weights to rollout once weights are loaded.
     # Skip policies that don't host an engine (frozen Megatron teachers,
     # PPO critics) — they have no paired SGLang server to push to.
-    from slime.utils.policy_config import has_sglang_engine
-
     if args.offload_rollout:
         ray.get(rollout_manager.onload_weights.remote())
     for h in handles.values():
@@ -307,5 +358,5 @@ def train(args):
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    train(args)
+    args, policy_configs = parse_multi_policy_args()
+    train(args, policy_configs)
