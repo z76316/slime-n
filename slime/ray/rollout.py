@@ -887,7 +887,7 @@ class RolloutManager:
         # Legacy single-policy callers pass nothing → falls back to self.args.
         args = policy_args if policy_args is not None else self.args
         if self.custom_reward_post_process_func is not None:
-            return self.custom_reward_post_process_func(args, samples)
+            return self.custom_reward_post_process_func(self.args, samples)
 
         raw_rewards = [sample.get_reward_value(args) for sample in samples]
         if args.advantage_estimator in ["grpo", "gspo", "reinforce_plus_plus_baseline"] and args.rewards_normalization:
@@ -931,9 +931,8 @@ class RolloutManager:
 
         policy_args: per-policy args namespace (multi-policy mode). None → self.args.
         """
-        args = policy_args if policy_args is not None else self.args
         if self.custom_convert_samples_to_train_data_func is not None:
-            return self.custom_convert_samples_to_train_data_func(args, samples)
+            return self.custom_convert_samples_to_train_data_func(self.args, samples)
 
         raw_rewards, rewards = self._post_process_rewards(samples, policy_args=policy_args)
 
