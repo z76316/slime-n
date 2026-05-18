@@ -2,6 +2,10 @@
 
 Multi-policy PPO with a **smaller critic than actor**: a 1.7B trainable **actor** generates rollouts; a 0.6B trainable **critic** runs `train_critic` (forward + value-loss + backward) on those rollouts and emits per-token `values` that feed PPO advantages into the actor's loss. Because the critic is its own Megatron Ray actor (separate weights, separate optimizer, separate GPU), it can be a different architecture from the actor — the use case legacy single-policy PPO (`train.py + --critic-config-path`) cannot express.
 
+![architecture: actor pair + standalone Megatron critic](./imgs/arch.png)
+
+*A trainable **actor** pair (Megatron + SGLang) and a trainable **critic** standalone Megatron actor (no engine). The critic emits per-token `values` into the actor's PPO loss via `external_data`.*
+
 ## Files
 
 * `config.yaml`: actor (Qwen3-1.7B, paired) + critic (Qwen3-0.6B, standalone) policy schema.

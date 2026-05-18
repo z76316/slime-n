@@ -2,6 +2,10 @@
 
 Paper-aligned implementation of [Subramaniam et al. 2025, "Multiagent Finetuning of Language Models"](https://arxiv.org/abs/2501.05707) Algorithm 1, on math problems (DAPO-math-17k). N=3 generator agents propose initial answers; in subsequent rounds an untracked summarize subroutine summarizes the OTHER agents' previous responses, and each critic agent updates its own answer from that summary. The dataset's ground-truth label is **intentionally ignored** — rewards come from a majority vote over the agents' own final critic responses (the paper's self-improvement-without-ground-truth setup).
 
+![architecture: N generators + N critics (paper-aligned debate)](./imgs/arch.png)
+
+*N trainable generator pairs + N trainable critic pairs (the paper sets N=3). Each round, every critic_i ingests a summary of the other agents' previous answers and updates its own; final rewards come from a ŷ majority vote over critic outputs — no ground-truth label.*
+
 ## Files
 
 * `config.yaml`: generator + critic policy schema (both trainable, paired with their own SGLang engines).

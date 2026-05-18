@@ -2,6 +2,10 @@
 
 Three trainable paired policies cooperate on math problems (DAPO-math-17k). The **solver** generates N candidate solutions; the **rewriter** sees all N solver candidates and synthesizes a refined solution per worker; the **selector** then sees the N rewriter candidates and emits `Judgment: IDX` picking one as best. The selector inherits the rewriter's correctness reward on the picked candidate.
 
+![architecture: three trainable pairs (solver, rewriter, selector)](./imgs/arch.png)
+
+*Three trainable pairs in a chain: solver → rewriter → selector. The solver emits N candidates, the rewriter rewrites each, the selector picks one with `Judgment: IDX`. Each role trains on its own buffer with its own optimizer.*
+
 ## Files
 
 * `config.yaml`: solver + rewriter + selector policy schema (all three trainable).

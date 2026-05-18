@@ -2,6 +2,10 @@
 
 Multi-policy on-policy distillation: a trainable **student** generates rollouts; a frozen **teacher_megatron** runs forward-only on those rollouts and emits per-token logprobs that feed a reverse-KL term (`KL(student ‖ teacher)`) into the student's loss. Because the teacher is its own Megatron Ray actor (separate weights, separate GPU), its forward kernels match the student's — keeping the KL noise floor low.
 
+![architecture: student pair + frozen Megatron teacher](./imgs/arch.png)
+
+*Trainable **student** pair (Megatron + SGLang) plus a frozen **teacher** standalone Megatron actor. Each rollout: student generates, teacher runs forward-only and emits `teacher_log_probs`; the driver merges that into the student's `external_data` for the reverse-KL term.*
+
 ## Files
 
 * `config.yaml`: student + teacher_megatron policy schema.

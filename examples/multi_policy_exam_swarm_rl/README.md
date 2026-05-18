@@ -1,6 +1,10 @@
-# Multi-Policy Exam Swarm RL Example
+# Multi-Policy Exam Swarm RL
 
 Train 8 homogeneous agents that independently solve the same math problems. Each agent's reward blends three signals: self-improvement (GRPO within its own K), swarm cooperation (EMA-baselined pass rate), and per-peer competition (rank vs other agents).
+
+![architecture: 8 homogeneous trainable pairs](./imgs/arch.png)
+
+*8 byte-identical trainable pairs sharing one rollout manager. Each agent has its own Megatron + SGLang and its own training buffer; rewards combine intra-agent (`self`), swarm-wide (`swarm`), and pairwise (`peer`) signals.*
 
 ## Files
 
