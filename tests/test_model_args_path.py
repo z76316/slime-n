@@ -123,6 +123,16 @@ def test_parse_sh_no_model_args_array_raises(tmp_path):
         _parse_sh_model_args(sh)
 
 
+def test_parse_sh_unsupported_error_uses_supported_path_language(tmp_path):
+    sh = _write(tmp_path, "m.sh", "MODEL_ARGS=(\n  --num-layers $NLAYERS\n)\n")
+    with pytest.raises(ValueError) as exc:
+        _parse_sh_model_args(sh)
+    msg = str(exc.value)
+    assert "unsupported bash interpolation" in msg
+    assert "Use one of these supported paths" in msg
+    assert "Workaround" not in msg
+
+
 def test_parse_sh_comments_and_blank_lines_skipped(tmp_path):
     sh = _write(
         tmp_path,
@@ -161,6 +171,22 @@ def test_load_model_sh_relative_resolves_against_repo_root():
 def test_load_model_sh_missing_raises():
     with pytest.raises(FileNotFoundError):
         _load_model_sh("scripts/models/__definitely_not_a_model__.sh")
+
+
+def test_load_model_sh_relative_parse_error_uses_original_path(tmp_path, monkeypatch):
+    from slime.utils import policy_config
+
+    model_dir = tmp_path / "scripts" / "models"
+    model_dir.mkdir(parents=True)
+    (model_dir / "wrapper.sh").write_text("echo no model args\n")
+
+    monkeypatch.setattr(policy_config, "_repo_root", lambda: str(tmp_path))
+    with pytest.raises(ValueError) as exc:
+        policy_config._load_model_sh("scripts/models/wrapper.sh")
+    msg = str(exc.value)
+    assert msg.startswith("scripts/models/wrapper.sh:")
+    assert str(tmp_path) not in msg
+    assert "Use one of these supported paths" in msg
 
 
 # ── parse_policy_configs merge behavior ──────────────────────────────────
@@ -381,6 +407,17 @@ def test_populate_rollout_arch_mixed_with_routing_replay_raises():
     policy_args = [argparse.Namespace(num_layers=28), argparse.Namespace(num_layers=64)]
     with pytest.raises(ValueError, match="mixed-arch"):
         populate_rollout_arch_fields(base, cfgs, policy_args)
+
+
+def test_populate_rollout_arch_missing_num_layers_with_routing_replay_raises():
+    base = argparse.Namespace(num_layers=None, use_rollout_routing_replay=True)
+    cfgs = [_engine_cfg("actor"), _engine_cfg("teacher")]
+    policy_args = [argparse.Namespace(num_layers=28), argparse.Namespace(num_layers=None)]
+    with pytest.raises(ValueError) as exc:
+        populate_rollout_arch_fields(base, cfgs, policy_args)
+    msg = str(exc.value)
+    assert "requires num_layers" in msg
+    assert "teacher" in msg
 
 
 def test_populate_rollout_arch_ignores_standalone_policies():

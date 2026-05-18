@@ -52,7 +52,7 @@ def _repo_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def _extract_model_args_tokens(path: str) -> list[str]:
+def _extract_model_args_tokens(path: str, display_path: str | None = None) -> list[str]:
     """Extract MODEL_ARGS=(...) body from a .sh file as a token list.
 
     Substitutes `${VAR:-default}` → literal default (env IGNORED). Rejects
@@ -62,11 +62,17 @@ def _extract_model_args_tokens(path: str) -> list[str]:
     import re
     import shlex
 
+    label = display_path or path
     with open(path) as f:
         text = f.read()
     m = re.search(r"MODEL_ARGS=\(\s*(.*?)\s*\)", text, re.DOTALL)
     if not m:
-        raise ValueError(f"{path}: no MODEL_ARGS=( ... ) array found")
+        raise ValueError(
+            f"{label}: no MODEL_ARGS=( ... ) array found. "
+            "Use one of these supported paths: keep this script on the legacy "
+            "`source ...` CLI path, or declare the architecture fully inline "
+            "in the policy's `megatron:` block."
+        )
     body = m.group(1)
 
     _interp_default = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*:-([^}]*)\}")
@@ -79,22 +85,25 @@ def _extract_model_args_tokens(path: str) -> list[str]:
         ln = _interp_default.sub(r"\1", ln)
         if "${" in ln or "$(" in ln or _bare_shell_var.search(ln):
             raise ValueError(
-                f"{path}: unsupported bash interpolation in `{ln}`; "
-                "only ${VAR:-default} is supported. Override the field "
-                "inline in the policy's megatron: block if needed."
+                f"{label}: unsupported bash interpolation in `{ln}`; "
+                "only ${VAR:-default} is supported. Use one of these supported "
+                "paths: keep this script on the legacy `source ...` CLI path, "
+                "or declare the affected architecture fields inline in the "
+                "policy's `megatron:` block."
             )
         cleaned.append(ln)
     return shlex.split(" ".join(cleaned))
 
 
-def _parse_sh_model_args(path: str) -> dict:
+def _parse_sh_model_args(path: str, display_path: str | None = None) -> dict:
     """Parse a MODEL_ARGS=( ... ) bash array into a snake_case-keyed dict.
 
     See plan_model_field.md "Bash → dict translation rules" for the full
     contract. Coerces numbers (int, float), keeps strings otherwise.
     `--no-foo` maps to `foo: False` (Megatron store_false convention).
     """
-    tokens = _extract_model_args_tokens(path)
+    label = display_path or path
+    tokens = _extract_model_args_tokens(path, display_path=label)
 
     def _coerce(raw: str):
         for caster in (int, float):
@@ -109,7 +118,7 @@ def _parse_sh_model_args(path: str) -> dict:
     while i < len(tokens):
         tok = tokens[i]
         if not tok.startswith("--"):
-            raise ValueError(f"{path}: unexpected token {tok!r} at MODEL_ARGS[{i}]")
+            raise ValueError(f"{label}: unexpected token {tok!r} at MODEL_ARGS[{i}]")
         is_store_false = tok.startswith("--no-")
         raw_name = tok[5:] if is_store_false else tok[2:]
         key = raw_name.replace("-", "_")
@@ -121,14 +130,14 @@ def _parse_sh_model_args(path: str) -> dict:
             result[key] = False if is_store_false else True
         elif is_store_false:
             raise ValueError(
-                f"{path}: store_false flag {tok!r} got a value {values!r}; " "`--no-X` flags don't take arguments."
+                f"{label}: store_false flag {tok!r} got a value {values!r}; " "`--no-X` flags don't take arguments."
             )
         elif len(values) == 1:
             result[key] = values[0]
         else:
             if key not in _MULTI_VALUE_FLAGS:
                 raise ValueError(
-                    f"{path}: flag {tok!r} got {len(values)} values "
+                    f"{label}: flag {tok!r} got {len(values)} values "
                     f"{values!r} but is not in the multi-value allowlist "
                     f"({sorted(_MULTI_VALUE_FLAGS)})."
                 )
@@ -197,20 +206,30 @@ def populate_rollout_arch_fields(base_args, policy_configs, all_policy_args) -> 
     PPO critic) never produce rollout tokens.
 
     Raises if `use_rollout_routing_replay` is True and engine-hosting
-    policies disagree on `num_layers`.
+    policies are missing `num_layers` or disagree on `num_layers`.
     """
-    engine_archs = {
-        getattr(pa, "num_layers", None)
+    engine_arch_by_name = {
+        cfg.name: getattr(pa, "num_layers", None)
         for cfg, pa in zip(policy_configs, all_policy_args, strict=True)
-        if has_sglang_engine(cfg) and getattr(pa, "num_layers", None) is not None
+        if has_sglang_engine(cfg)
     }
-    if getattr(base_args, "use_rollout_routing_replay", False) and len(engine_archs) > 1:
-        raise ValueError(
-            "mixed-arch + routed-expert rollout not supported in v1: "
-            f"engine-hosting policies disagree on num_layers ({sorted(engine_archs)}). "
-            "Either disable use_rollout_routing_replay or align num_layers across "
-            "engine-hosting policies."
-        )
+    engine_archs = {num_layers for num_layers in engine_arch_by_name.values() if num_layers is not None}
+    if getattr(base_args, "use_rollout_routing_replay", False):
+        missing = sorted(name for name, num_layers in engine_arch_by_name.items() if num_layers is None)
+        if missing:
+            raise ValueError(
+                "routed-expert rollout requires num_layers for every engine-hosting policy; "
+                f"missing for policies: {missing}. "
+                "Set megatron.model_args_path to a supported static MODEL_ARGS script, "
+                "or declare num_layers inline in each policy's megatron block."
+            )
+        if len(engine_archs) > 1:
+            raise ValueError(
+                "mixed-arch + routed-expert rollout not supported in v1: "
+                f"engine-hosting policies disagree on num_layers ({sorted(engine_archs)}). "
+                "Either disable use_rollout_routing_replay or align num_layers across "
+                "engine-hosting policies."
+            )
     if len(engine_archs) == 1:
         base_args.num_layers = next(iter(engine_archs))
 
@@ -222,7 +241,7 @@ def _load_model_sh(path: str) -> dict:
     sh_path = path if os.path.isabs(path) else os.path.join(_repo_root(), path)
     if not os.path.exists(sh_path):
         raise FileNotFoundError(f"model_args_path: {sh_path!r} not found (from {path!r}).")
-    return _parse_sh_model_args(sh_path)
+    return _parse_sh_model_args(sh_path, display_path=path)
 
 
 @dataclasses.dataclass
@@ -586,7 +605,9 @@ def config_to_namespace(cfg: PolicyConfig, base_args):
     Sets policy_name = cfg.name so downstream code (update_weights routing,
     Sample.policy_name tagging) can read it from args.
 
-    Pure function — used by create_training_models_multi to build per-policy Namespaces.
+    Builds a fresh namespace on every call. For Megatron-hosting policies, this
+    also runs HF + Megatron validation; the Megatron validator intentionally
+    mutates the namespace with its normalized defaults.
     """
     from argparse import Namespace
 
@@ -677,13 +698,11 @@ def config_to_namespace(cfg: PolicyConfig, base_args):
     _apply_megatron_defaults(ns, cfg)
 
     # For Megatron-hosting policies, run HF + structural validation on
-    # this namespace. Both validators are pure functions of `ns`, so
-    # running them inside `config_to_namespace` means every caller
-    # (parse_multi_policy_args pre-flight, placement_group actor build,
-    # megatron-less placeholder for SGLang-only policies — skipped via
-    # the gate below) sees the validator's in-place mutations
+    # this namespace. Megatron validation mutates `ns`
     # (variable_seq_lengths=True, moe_token_dispatcher_type rewrites,
-    # ...). Replaces the prior policy_args_by_name pass-through scheme.
+    # ...), so each caller rebuilds a fresh namespace and reapplies the
+    # same normalization. Replaces the prior policy_args_by_name
+    # pass-through scheme.
     #
     # Gated on Megatron being importable so config-layer unit tests
     # (no Megatron backend installed) still work — config_to_namespace
