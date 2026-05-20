@@ -4,19 +4,43 @@
 
 ### A Multi-Policy, Multi-Agent RL Framework
 
-### Scale Multi-Agent RL from 1 Policy to 100+ Policies
+### One config. Any mix of training, inference, and engines. From 1 policy to 100+.
 </div>
 
 
-slime<sup>n</sup> extends [slime](https://github.com/THUDM/slime) into a flexible multi-policy and multi-agent RL training framework. Each run can be composed of any combination of three policy types:
+slime<sup>n</sup> extends [slime](https://github.com/THUDM/slime) into a flexible multi-policy, multi-agent RL training framework.
+
+Unlike most RL frameworks that assume a fixed structure — such as a single trainer or a hard-coded actor–critic setup — slime<sup>n</sup> takes a compositional approach: each run is defined as a list of components, freely assembled from three primitives:
+
+- **Trainable policy pair**: a Megatron training actor paired with an SGLang rollout engine.
+- **Standalone Megatron actor**: a Megatron-only component, either trainable or frozen.
+- **Standalone SGLang engine**: an inference-only engine for frozen policies, reward models, judges, or verifiers.
+
+![slime^n](./imgs/arch_2.png) 
+
+With this unified schema, the same framework can support on-policy distillation, cooperative multi-agent RL, asymmetric PPO, reward-model serving, and other multi-policy workloads — without custom plumbing for each setup.
 
 
 
-- **Trainable policy pair** — a Megatron training actor paired with an SGLang rollout engine. The default workhorse for single policy RL.
-- **Standalone Megatron actor (frozen/trainable)** — Megatron only, no SGLang engine. Trainable variant trains its own loss without rolling out (e.g. a PPO critic); frozen variant runs forward-only and emits per-token logprobs (e.g. an OPD teacher).
-- **Standalone SGLang engine (frozen)** — SGLang only, no trainer; serves inference for reward models, verifier or OPD teacher.
+## Use Cases
 
-![multi-policy architecture](./imgs/arch_2.png)
+Once **policy** is the unit of ownership — weights, optimizer, buffer, checkpoint — a wide class of multi-role RL systems becomes natural to express. The schema already covers:
+
+| | |
+|:---:|:---:|
+| ![OPD — Megatron teacher](./examples/multi_policy_opd_megatron/imgs/arch.png) | ![OPD — SGLang teacher](./examples/multi_policy_opd_sglang/imgs/arch.png) |
+| **OPD — Megatron teacher** | **OPD — SGLang teacher** |
+| ![Asymmetric PPO](./examples/multi_policy_ppo/imgs/arch.png) | ![Solver + Summarizer](./examples/multi_policy_solver_summarizer/imgs/arch.png) |
+| **Asymmetric PPO** (actor + critic) | **Solver + Summarizer** |
+| ![Multi-Agent Debate](./examples/multi_policy_multiagent_debate/imgs/arch.png) | ![Cooperative Swarm](./examples/multi_policy_exam_swarm_rl/imgs/arch.png) |
+| **Multi-Agent Debate** | **Cooperative Swarm** |
+| ![Multi-Agent (solver + rewriter + selector)](./examples/multi_policy_multi_agent/imgs/arch.png) | |
+| **Multi-Agent** (solver + rewriter + selector) | |
+
+*Each use case above composed from the three primitives.*
+
+Natural extensions of the same primitives — actor + judge, actor + verifier + repair policy, red-team / blue-team, teacher cascades, ensemble critics, self-play, curriculum generators, specialist routing — fall out of the policy abstraction without new framework code.
+
 
 ## Features
 
@@ -94,6 +118,10 @@ Rewards are computed from the final critic responses: the system majority-votes 
 
 Both `generator` and `critic` are trainable paired policies (Megatron + SGLang). The summarize step is routed through the generator SGLang engine, but its samples are not added to a training buffer. Code: [`examples/multi_policy_multiagent_debate`](examples/multi_policy_multiagent_debate).
 
+![multi-agent debate training reward](./examples/multi_policy_multiagent_debate/imgs/reward.png)
+
+*Paper-aligned debate on DAPO-math-17k, ground-truth label intentionally ignored. The ŷ majority vote over critic outputs is the only training signal; both generator and critic rewards rise round by round.*
+
 ### 2. Multi-Policy Solver + Summarizer — candidate generation + final answer synthesis
 
 Two trainable paired policies cooperate on math problems. The `solver` policy generates N candidate solutions in parallel. The `summarizer` policy then sees all N solver candidates and synthesizes a final answer in the standard `Answer: \boxed{...}` format.
@@ -101,6 +129,10 @@ Two trainable paired policies cooperate on math problems. The `solver` policy ge
 Both policies train on split buffers and receive direct RLVR correctness rewards on their own completions. The example also applies group reward shaping from the summarizer phase: if the mean summarizer reward is high, both roles are upweighted; otherwise both roles are downweighted.
 
 Both `solver` and `summarizer` are trainable paired policies (Megatron + SGLang). Code: [`examples/multi_policy_solver_summarizer`](examples/multi_policy_solver_summarizer).
+
+![solver + summarizer training reward](./examples/multi_policy_solver_summarizer/imgs/reward.png)
+
+*Solver and summarizer trained together in a single run on DAPO-math-17k — each policy carries its own optimizer and buffer; both rewards rise jointly.*
 
 ### 3. OPD — on-policy distillation (student + frozen teacher)
 
