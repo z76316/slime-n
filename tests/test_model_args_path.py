@@ -284,6 +284,125 @@ def test_explicit_norm_epsilon_pair_is_preserved(tmp_path):
     assert cfg.extra_megatron_args["layernorm_epsilon"] == 1e-5
 
 
+def test_disable_bias_linear_from_sh_inverts_add_bias_linear(tmp_path):
+    """`.sh` bare flag `--disable-bias-linear` lands as `disable_bias_linear=True`
+    via kebab→snake; upstream Megatron stores it into `add_bias_linear=False`.
+    The reconcile step mirrors with polarity flip so the Megatron-side field is
+    populated correctly without the user knowing about the rename."""
+    sh = _write(tmp_path, "m.sh", "MODEL_ARGS=(\n  --disable-bias-linear\n)\n")
+    cfg_path = _yaml(
+        tmp_path,
+        [
+            {
+                "name": "p",
+                "hf_checkpoint": "/x",
+                "num_gpus_per_node": 1,
+                "megatron": {"model_args_path": sh},
+                "sglang": {"server_groups": [{"worker_type": "regular", "num_gpus": 1}]},
+            }
+        ],
+    )
+
+    cfg = parse_policy_configs(cfg_path)[0]
+
+    assert cfg.extra_megatron_args is not None
+    assert cfg.extra_megatron_args["disable_bias_linear"] is True
+    assert cfg.extra_megatron_args["add_bias_linear"] is False
+
+
+def test_inline_add_bias_linear_false_mirrors_disable_bias_linear_true(tmp_path):
+    """Inverse direction of the polarity flip — a user who already knows the
+    Megatron-side field name can write `add_bias_linear: false` inline."""
+    cfg_path = _yaml(
+        tmp_path,
+        [
+            {
+                "name": "p",
+                "hf_checkpoint": "/x",
+                "num_gpus_per_node": 1,
+                "megatron": {"add_bias_linear": False},
+                "sglang": {"server_groups": [{"worker_type": "regular", "num_gpus": 1}]},
+            }
+        ],
+    )
+
+    cfg = parse_policy_configs(cfg_path)[0]
+
+    assert cfg.extra_megatron_args is not None
+    assert cfg.extra_megatron_args["disable_bias_linear"] is True
+    assert cfg.extra_megatron_args["add_bias_linear"] is False
+
+
+def test_apply_layernorm_1p_mirrors_layernorm_zero_centered_gamma(tmp_path):
+    """Same-polarity boolean rename — bare flag → True on both keys."""
+    sh = _write(tmp_path, "m.sh", "MODEL_ARGS=(\n  --apply-layernorm-1p\n)\n")
+    cfg_path = _yaml(
+        tmp_path,
+        [
+            {
+                "name": "p",
+                "hf_checkpoint": "/x",
+                "num_gpus_per_node": 1,
+                "megatron": {"model_args_path": sh},
+                "sglang": {"server_groups": [{"worker_type": "regular", "num_gpus": 1}]},
+            }
+        ],
+    )
+
+    cfg = parse_policy_configs(cfg_path)[0]
+
+    assert cfg.extra_megatron_args is not None
+    assert cfg.extra_megatron_args["apply_layernorm_1p"] is True
+    assert cfg.extra_megatron_args["layernorm_zero_centered_gamma"] is True
+
+
+def test_fp8_format_mirrors_fp8(tmp_path):
+    """Same-polarity string rename — `--fp8-format hybrid` lands on both
+    `fp8_format` (naive) and `fp8` (real Megatron field)."""
+    sh = _write(tmp_path, "m.sh", "MODEL_ARGS=(\n  --fp8-format hybrid\n)\n")
+    cfg_path = _yaml(
+        tmp_path,
+        [
+            {
+                "name": "p",
+                "hf_checkpoint": "/x",
+                "num_gpus_per_node": 1,
+                "megatron": {"model_args_path": sh},
+                "sglang": {"server_groups": [{"worker_type": "regular", "num_gpus": 1}]},
+            }
+        ],
+    )
+
+    cfg = parse_policy_configs(cfg_path)[0]
+
+    assert cfg.extra_megatron_args is not None
+    assert cfg.extra_megatron_args["fp8_format"] == "hybrid"
+    assert cfg.extra_megatron_args["fp8"] == "hybrid"
+
+
+def test_explicit_disable_bias_linear_pair_is_preserved(tmp_path):
+    """If a user sets both keys to disagreeing values, respect both — the
+    reconcile step is opt-in completion, not opinionated rewriting."""
+    cfg_path = _yaml(
+        tmp_path,
+        [
+            {
+                "name": "p",
+                "hf_checkpoint": "/x",
+                "num_gpus_per_node": 1,
+                "megatron": {"disable_bias_linear": True, "add_bias_linear": True},
+                "sglang": {"server_groups": [{"worker_type": "regular", "num_gpus": 1}]},
+            }
+        ],
+    )
+
+    cfg = parse_policy_configs(cfg_path)[0]
+
+    assert cfg.extra_megatron_args is not None
+    assert cfg.extra_megatron_args["disable_bias_linear"] is True
+    assert cfg.extra_megatron_args["add_bias_linear"] is True
+
+
 def test_inline_megatron_beats_sh_value(tmp_path):
     sh = _write(
         tmp_path,

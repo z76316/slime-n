@@ -146,15 +146,54 @@ def _parse_sh_model_args(path: str, display_path: str | None = None) -> dict:
     return result
 
 
-def _reconcile_megatron_norm_eps_aliases(extras: dict[str, Any]) -> dict[str, Any]:
-    """Mirror Megatron's two RMSNorm epsilon knobs when only one is provided."""
-    if "norm_epsilon" in extras and "layernorm_epsilon" not in extras:
-        extras = dict(extras)
-        extras["layernorm_epsilon"] = extras["norm_epsilon"]
-    elif "layernorm_epsilon" in extras and "norm_epsilon" not in extras:
-        extras = dict(extras)
-        extras["norm_epsilon"] = extras["layernorm_epsilon"]
-    return extras
+# Megatron decouples some CLI flag names from the dataclass field they store
+# into via `field(metadata={"argparse_meta": {"arg_names": [...]}})` in
+# megatron/core/transformer/transformer_config.py. Our `.sh` parser does
+# naive kebab→snake on the flag name (e.g. `--norm-epsilon` →
+# `norm_epsilon`), but Megatron's argparse would store into the real field
+# (`layernorm_epsilon`). When MODEL_ARGS flows through this parser instead
+# of through Megatron's CLI, the renamed attribute is never populated.
+#
+# Each entry is (naive_dest, real_field, invert):
+#   - invert=False: store_true / scalar flags whose dest name was renamed.
+#                   Both keys end up equal.
+#   - invert=True : "negative" toggle flags (`--disable-FOO`, `--no-FOO`)
+#                   whose presence on the CLI sets the underlying field
+#                   to the inverse value.
+#
+# Audit source: upstream megatron/core/transformer/transformer_config.py.
+# Grow this table as new Megatron releases add metadata-renamed flags.
+_MEGATRON_FLAG_RENAMES: tuple[tuple[str, str, bool], ...] = (
+    ("norm_epsilon", "layernorm_epsilon", False),
+    ("disable_bias_linear", "add_bias_linear", True),
+    ("apply_layernorm_1p", "layernorm_zero_centered_gamma", False),
+    ("disable_mamba_mem_eff_path", "use_mamba_mem_eff_path", True),
+    ("fp8_format", "fp8", False),
+    ("fp4_format", "fp4", False),
+    ("fp4_param_gather", "fp4_param", False),
+)
+
+
+def _reconcile_megatron_flag_renames(extras: dict[str, Any]) -> dict[str, Any]:
+    """Mirror flag-name / field-name pairs that Megatron's argparse renames.
+
+    When only one of a known pair is provided in `extras`, copy the value
+    onto the other (inverting booleans for `--disable-FOO`-style toggles)
+    so the downstream Megatron-side field stays populated. When both are
+    provided, respect both — the user has explicitly disagreed and we
+    don't pretend to know which they meant.
+
+    See `_MEGATRON_FLAG_RENAMES` for the table.
+    """
+    out = dict(extras)
+    for naive, real, invert in _MEGATRON_FLAG_RENAMES:
+        n_in = naive in out
+        r_in = real in out
+        if n_in and not r_in:
+            out[real] = (not out[naive]) if invert else out[naive]
+        elif r_in and not n_in:
+            out[naive] = (not out[real]) if invert else out[real]
+    return out
 
 
 def _apply_megatron_defaults(policy_args, cfg) -> None:
@@ -467,7 +506,7 @@ def parse_policy_configs(config_path: str) -> list[PolicyConfig]:
             parsed_extras = {k: v for k, v in parsed.items() if k not in known_field_names}
             megatron_known = {**parsed_known, **megatron_known}
             megatron_extras = {**parsed_extras, **megatron_extras}
-        megatron_extras = _reconcile_megatron_norm_eps_aliases(megatron_extras)
+        megatron_extras = _reconcile_megatron_flag_renames(megatron_extras)
 
         flat: dict[str, Any] = {
             "name": entry["name"],
