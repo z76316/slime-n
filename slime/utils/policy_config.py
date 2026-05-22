@@ -146,6 +146,17 @@ def _parse_sh_model_args(path: str, display_path: str | None = None) -> dict:
     return result
 
 
+def _reconcile_megatron_norm_eps_aliases(extras: dict[str, Any]) -> dict[str, Any]:
+    """Mirror Megatron's two RMSNorm epsilon knobs when only one is provided."""
+    if "norm_epsilon" in extras and "layernorm_epsilon" not in extras:
+        extras = dict(extras)
+        extras["layernorm_epsilon"] = extras["norm_epsilon"]
+    elif "layernorm_epsilon" in extras and "norm_epsilon" not in extras:
+        extras = dict(extras)
+        extras["norm_epsilon"] = extras["layernorm_epsilon"]
+    return extras
+
+
 def _apply_megatron_defaults(policy_args, cfg) -> None:
     """Re-derive Megatron defaults on a per-policy namespace.
 
@@ -456,6 +467,7 @@ def parse_policy_configs(config_path: str) -> list[PolicyConfig]:
             parsed_extras = {k: v for k, v in parsed.items() if k not in known_field_names}
             megatron_known = {**parsed_known, **megatron_known}
             megatron_extras = {**parsed_extras, **megatron_extras}
+        megatron_extras = _reconcile_megatron_norm_eps_aliases(megatron_extras)
 
         flat: dict[str, Any] = {
             "name": entry["name"],

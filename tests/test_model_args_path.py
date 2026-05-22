@@ -220,6 +220,70 @@ def test_model_args_path_loads_into_extras_and_known(tmp_path):
     assert cfg.extra_megatron_args["num_layers"] == 28
 
 
+def test_norm_epsilon_from_model_args_path_mirrors_layernorm_epsilon(tmp_path):
+    sh = _write(tmp_path, "m.sh", "MODEL_ARGS=(\n  --norm-epsilon 1e-6\n)\n")
+    cfg_path = _yaml(
+        tmp_path,
+        [
+            {
+                "name": "p",
+                "hf_checkpoint": "/x",
+                "num_gpus_per_node": 1,
+                "megatron": {"model_args_path": sh},
+                "sglang": {"server_groups": [{"worker_type": "regular", "num_gpus": 1}]},
+            }
+        ],
+    )
+
+    cfg = parse_policy_configs(cfg_path)[0]
+
+    assert cfg.extra_megatron_args is not None
+    assert cfg.extra_megatron_args["norm_epsilon"] == 1e-6
+    assert cfg.extra_megatron_args["layernorm_epsilon"] == 1e-6
+
+
+def test_inline_layernorm_epsilon_mirrors_norm_epsilon(tmp_path):
+    cfg_path = _yaml(
+        tmp_path,
+        [
+            {
+                "name": "p",
+                "hf_checkpoint": "/x",
+                "num_gpus_per_node": 1,
+                "megatron": {"layernorm_epsilon": 1e-6},
+                "sglang": {"server_groups": [{"worker_type": "regular", "num_gpus": 1}]},
+            }
+        ],
+    )
+
+    cfg = parse_policy_configs(cfg_path)[0]
+
+    assert cfg.extra_megatron_args is not None
+    assert cfg.extra_megatron_args["norm_epsilon"] == 1e-6
+    assert cfg.extra_megatron_args["layernorm_epsilon"] == 1e-6
+
+
+def test_explicit_norm_epsilon_pair_is_preserved(tmp_path):
+    cfg_path = _yaml(
+        tmp_path,
+        [
+            {
+                "name": "p",
+                "hf_checkpoint": "/x",
+                "num_gpus_per_node": 1,
+                "megatron": {"norm_epsilon": 1e-6, "layernorm_epsilon": 1e-5},
+                "sglang": {"server_groups": [{"worker_type": "regular", "num_gpus": 1}]},
+            }
+        ],
+    )
+
+    cfg = parse_policy_configs(cfg_path)[0]
+
+    assert cfg.extra_megatron_args is not None
+    assert cfg.extra_megatron_args["norm_epsilon"] == 1e-6
+    assert cfg.extra_megatron_args["layernorm_epsilon"] == 1e-5
+
+
 def test_inline_megatron_beats_sh_value(tmp_path):
     sh = _write(
         tmp_path,
