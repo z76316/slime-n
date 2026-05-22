@@ -1439,7 +1439,7 @@ def _pre_parse_mode():
     return temp_args
 
 
-def parse_args(add_custom_arguments=None):
+def parse_args(add_custom_arguments=None, skip_megatron_model_validation: bool = False):
     # Users may call `parse_args` very early, thus we ensure logger is configured here
     configure_logger()
 
@@ -1462,7 +1462,7 @@ def parse_args(add_custom_arguments=None):
 
     args = megatron_parse_args(
         extra_args_provider=add_slime_arguments,
-        skip_hf_validate=pre.debug_rollout_only,
+        skip_hf_validate=pre.debug_rollout_only or skip_megatron_model_validation,
     )
 
     # Merge pre-parsed args into the main namespace
@@ -1476,7 +1476,7 @@ def parse_args(add_custom_arguments=None):
 
     slime_validate_args(args)
 
-    if pre.train_backend == "megatron" and not args.debug_rollout_only:
+    if pre.train_backend == "megatron" and not args.debug_rollout_only and not skip_megatron_model_validation:
         megatron_validate_args(args)
 
     if not args.debug_train_only:

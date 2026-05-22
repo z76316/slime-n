@@ -222,6 +222,17 @@ async def generate(args: Namespace, sample: Sample, sampling_params: dict[str, A
     sample.rollout_log_probs += new_response_log_probs
 
     if "routed_experts" in output["meta_info"]:
+        # Belt-and-suspenders for the multi-policy parse-flow refactor:
+        # `args.num_layers` must be populated before this reshape. In
+        # multi-policy runs, `parse_multi_policy_args._populate_rollout_arch_fields`
+        # copies the shared num_layers from engine-hosting policies onto
+        # `base_args` (and raises on mixed-arch + routing replay). If we get
+        # here with None, some path bypassed that contract — fail loudly.
+        assert args.num_layers is not None, (
+            "args.num_layers is None at rollout time. Multi-policy runs must go "
+            "through train_multi_policy.parse_multi_policy_args() so the engine-"
+            "hosting policies' num_layers is projected onto the rollout args."
+        )
         sample.rollout_routed_experts = np.frombuffer(
             pybase64.b64decode(output["meta_info"]["routed_experts"].encode("ascii")),
             dtype=np.int32,
