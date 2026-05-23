@@ -294,6 +294,36 @@ def _load_model_sh(path: str) -> dict:
     return _parse_sh_model_args(sh_path, display_path=path)
 
 
+# PolicyConfig fields whose None value means "inherit from base_args"
+# instead of "set the runtime namespace field to None". Used by
+# `config_to_namespace` to skip these during the generic dataclass copy,
+# and by `_build_policy_data_views` to know which keys came from YAML
+# (declared) vs. inherited.
+POLICY_DATA_VIEW_KEYS: tuple[str, ...] = ("input_key", "label_key", "apply_chat_template")
+
+
+@dataclasses.dataclass(frozen=True)
+class PolicyDataView:
+    """Resolved per-policy row materialization settings.
+
+    Carries ONLY row-shape concerns (which key to read, which template
+    to apply). Batching concerns (n_samples_per_prompt, group sizing)
+    live on the policy's args namespace and are looked up by the data
+    source separately at get_samples time. Mixing the two here would
+    couple two orthogonal axes.
+
+    `declared_keys` records which keys the policy explicitly set in YAML
+    (vs. inherited from `base_args`). The row-backed data-source path
+    uses this to decide whether to hard-fail on missing keys (declared)
+    or soft-fall back to the legacy `.get()` semantics (inherited).
+    """
+
+    input_key: str | None
+    label_key: str | None
+    apply_chat_template: bool
+    declared_keys: frozenset[str]
+
+
 @dataclasses.dataclass
 class PolicyConfig:
     # ── identity ──
@@ -420,6 +450,19 @@ class PolicyConfig:
     # and bare `$VAR` are rejected.
     model_args_path: str | None = None
 
+    # ── per-policy prompt-source keys (data-view) ──
+    # When set, override the global --input-key / --label-key /
+    # --apply-chat-template for *this policy's* dataset view. Lets one
+    # jsonl row carry per-policy columns (e.g. solver_prompt,
+    # critic_prompt, label) and route each policy to its own column.
+    # None → inherit from base_args (the CLI global, identical to today's
+    # single-key behavior). Live at the top level of the policy entry
+    # in YAML, not inside `megatron:` / `sglang:` — these are data-source
+    # fields, not training/serving fields.
+    input_key: str | None = None
+    label_key: str | None = None
+    apply_chat_template: bool | None = None
+
 
 def has_sglang_engine(cfg: PolicyConfig) -> bool:
     """True iff the policy hosts an SGLang engine.
@@ -491,7 +534,34 @@ def parse_policy_configs(config_path: str) -> list[PolicyConfig]:
         # live there when policies don't share architecture).
         known_field_names = {f.name for f in dataclasses.fields(PolicyConfig)}
         megatron_block = entry.get("megatron") or {}
-        megatron_known = {k: v for k, v in megatron_block.items() if k in known_field_names}
+
+        # Data-view keys are top-level, not under `megatron:` OR `sglang:`.
+        # PolicyConfig exposes them as dataclass fields (so
+        # config_to_namespace can project them) but they describe the
+        # rollout data source, not the Megatron actor or SGLang engine.
+        # Reject silently-shadowing nested entries with a clear error.
+        # `megatron:` would otherwise win the merge order over top-level;
+        # `sglang:` would be quietly swallowed by sglang_block, leaving
+        # the policy override undeclared and the rollout reading the
+        # CLI global — same silent-wrong-prompt class as the megatron
+        # case but harder to spot.
+        sglang_block_raw = entry.get("sglang") or {}
+        nested_misplaced = {
+            "megatron": [k for k in POLICY_DATA_VIEW_KEYS if k in megatron_block],
+            "sglang": [k for k in POLICY_DATA_VIEW_KEYS if k in sglang_block_raw],
+        }
+        for nest_name, keys in nested_misplaced.items():
+            if keys:
+                raise ValueError(
+                    f"{entry.get('name', '<unnamed>')}: data-view keys "
+                    f"{keys} must be top-level policy entries, not under "
+                    f"`{nest_name}:`. They describe the rollout data source, "
+                    "not the Megatron actor or SGLang engine."
+                )
+
+        megatron_known = {
+            k: v for k, v in megatron_block.items() if k in known_field_names and k not in POLICY_DATA_VIEW_KEYS
+        }
         megatron_extras = {k: v for k, v in megatron_block.items() if k not in known_field_names}
 
         # When megatron.model_args_path is set, load the .sh and merge its
@@ -520,6 +590,11 @@ def parse_policy_configs(config_path: str) -> list[PolicyConfig]:
             "num_gpus_per_node": entry.get("num_gpus_per_node", 8),
             "megatron_num_nodes": entry.get("megatron_num_nodes", 1),
             "sglang_num_nodes": entry.get("sglang_num_nodes", 1),
+            # Data-view fields are top-level (not under `megatron:`). None
+            # means "inherit from base_args" — only set the dataclass field
+            # when the key is actually present in YAML so we can later tell
+            # "explicitly null" from "omitted" if needed.
+            **{k: entry[k] for k in POLICY_DATA_VIEW_KEYS if k in entry},
             **megatron_known,
             "extra_megatron_args": megatron_extras or None,
             "sglang": sglang_block,
@@ -546,6 +621,99 @@ def _validate_unique_sglang_servers(configs: list[PolicyConfig]) -> None:
     servers = [c.sglang_server for c in configs]
     if len(servers) != len(set(servers)):
         raise ValueError(f"two policies cannot push to the same sglang_server: {servers}")
+
+
+def _build_policy_data_views(configs: list[PolicyConfig], base_args) -> dict[str, PolicyDataView]:
+    """Resolve per-policy data views from `PolicyConfig`s + `base_args`.
+
+    For every policy (including frozen / SGLang-only / Megatron-only), build
+    a `PolicyDataView` with effective values: cfg override when set, else
+    inherited from `base_args`. `declared_keys` records exactly which keys
+    came from YAML (vs. inherited) so downstream strict-fail behavior only
+    applies when a policy explicitly declared the key.
+
+    Includes ALL policies — not just trainable ones — because data views
+    are a row-shape concern and frozen producers / judges may need a
+    different prompt column too.
+    """
+    out: dict[str, PolicyDataView] = {}
+    for cfg in configs:
+        declared: set[str] = set()
+        resolved: dict[str, Any] = {}
+        for key in POLICY_DATA_VIEW_KEYS:
+            val = getattr(cfg, key)
+            if val is not None:
+                declared.add(key)
+                resolved[key] = val
+            else:
+                resolved[key] = getattr(base_args, key, None)
+        out[cfg.name] = PolicyDataView(
+            input_key=resolved["input_key"],
+            label_key=resolved["label_key"],
+            # apply_chat_template is bool; resolve to False when both override
+            # and base_args lack a value (matches the CLI argparse default).
+            apply_chat_template=bool(resolved["apply_chat_template"]),
+            declared_keys=frozenset(declared),
+        )
+    return out
+
+
+def _guard_data_views_not_yet_wired_to_rollout(configs: list[PolicyConfig]) -> None:
+    """Fail-fast guard while Phase B is unlanded.
+
+    Phase A wires per-policy `input_key` / `label_key` / `apply_chat_template`
+    into the per-policy *training-actor* namespace via `config_to_namespace`,
+    but Phase B hasn't landed yet — `RolloutDataSource` still builds its
+    `Dataset` from the global `args.input_key`, so a policy that declares
+    `input_key: solver_prompt` would have its training side honor the
+    override while rollout-side prompts silently keep reading the CLI
+    global. That's a silent-wrong-prompt footgun.
+
+    Until the row-backed multi-view data-source path lands (see
+    plan_data_json_format.md, Phase B), reject any policy that declares
+    one of these fields with a clear pointer to the plan.
+
+    Remove this guard once Phase B is in.
+    """
+    offenders = [(cfg.name, [k for k in POLICY_DATA_VIEW_KEYS if getattr(cfg, k) is not None]) for cfg in configs]
+    offenders = [(name, keys) for (name, keys) in offenders if keys]
+    if offenders:
+        details = "; ".join(f"{name} declares {keys}" for name, keys in offenders)
+        raise NotImplementedError(
+            "per-policy data-view fields (input_key / label_key / "
+            f"apply_chat_template) are not yet wired to RolloutDataSource. "
+            f"Policies that declare them ({details}) would have the override "
+            "honored only on the Megatron-actor side while the rollout still "
+            "reads the CLI global. See plan_data_json_format.md (Phase B). "
+            "Workaround: don't declare these fields until Phase B lands; "
+            "use the global --input-key / --label-key / --apply-chat-template."
+        )
+
+
+def _validate_shared_buffer_data_view_consistency(configs: list[PolicyConfig], base_args) -> None:
+    """Shared-buffer policies must resolve to the same data-view values.
+
+    Compares RESOLVED values (override-else-inherit), not raw YAML. Two
+    siblings that both omit a key inherit the same CLI global and pass.
+    A sibling whose override happens to equal the inherited global also
+    passes. Only divergent effective values raise.
+
+    Pre-existing `_validate_shared_buffer_consistency` checks
+    (advantage_estimator, n_samples_per_prompt) stay in
+    `parse_policy_configs` because they don't depend on `base_args`.
+    """
+    shared = [c for c in configs if c.buffer_mode == "shared"]
+    if len(shared) <= 1:
+        return
+    views = _build_policy_data_views(shared, base_args)
+    for key in POLICY_DATA_VIEW_KEYS:
+        attr = "apply_chat_template" if key == "apply_chat_template" else key
+        per_policy = {c.name: getattr(views[c.name], attr) for c in shared}
+        if len(set(per_policy.values())) > 1:
+            raise ValueError(
+                f"shared-buffer policies must agree on resolved {key!r} "
+                f"(override else inherited CLI global): {per_policy}"
+            )
 
 
 def _validate_shared_buffer_consistency(configs: list[PolicyConfig]) -> None:
@@ -664,7 +832,20 @@ def config_to_namespace(cfg: PolicyConfig, base_args):
 
     ns = Namespace(**vars(base_args))
     for f in dataclasses.fields(cfg):
+        # Data-view keys are inherit-when-None: skip in the generic copy so
+        # that an omitted YAML field (cfg.<key> == None) doesn't clobber the
+        # base_args / CLI global value. Write the resolved value below.
+        if f.name in POLICY_DATA_VIEW_KEYS:
+            continue
         setattr(ns, f.name, getattr(cfg, f.name))
+
+    # Data-view projection: override else inherit from base_args. The
+    # `_*_declared` info lives on PolicyDataView (the row-backed data
+    # source consults it for strict-fail decisions), not as parallel
+    # namespace attributes — one source of truth.
+    for key in POLICY_DATA_VIEW_KEYS:
+        val = getattr(cfg, key)
+        setattr(ns, key, getattr(base_args, key, None) if val is None else val)
     # Apply per-policy Megatron flag overrides (extra_megatron_args) as the
     # last step before slime-specific reconciliation below. Unknown YAML keys
     # in the `megatron:` block land here; setattr-ing them onto ns overrides

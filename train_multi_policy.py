@@ -14,6 +14,8 @@ from slime.utils.arguments import parse_args
 from slime.utils.logging_utils import configure_logger, finish_tracking, init_tracking, update_tracking_open_metrics
 from slime.utils.misc import should_run_periodic_action
 from slime.utils.policy_config import (
+    _guard_data_views_not_yet_wired_to_rollout,
+    _validate_shared_buffer_data_view_consistency,
     build_sglang_config_from_policies,
     config_to_namespace,
     derive_cluster_sizing,
@@ -116,6 +118,21 @@ def parse_multi_policy_args():
     # per-policy YAML, not global CLI. Per-policy validation happens
     # inside `config_to_namespace`.
     base_args = parse_args(skip_megatron_model_validation=True)
+
+    # Until Phase B (row-backed multi-view rollout data source) lands,
+    # reject any policy that declares input_key / label_key /
+    # apply_chat_template — the override would be honored on the
+    # Megatron-actor side but silently ignored on the rollout side.
+    # Remove this guard when Phase B is in.
+    _guard_data_views_not_yet_wired_to_rollout(policy_configs)
+
+    # Shared-buffer data-view consistency. Runs HERE (not in
+    # parse_policy_configs) because resolving "did this policy override
+    # input_key, or inherit the CLI global?" needs `base_args`, which
+    # parse_policy_configs doesn't have. Two siblings that both omit a
+    # key inherit the same value and pass; only divergent EFFECTIVE
+    # values raise.
+    _validate_shared_buffer_data_view_consistency(policy_configs, base_args)
 
     # Set multi-policy globals on base_args BEFORE building per-policy
     # namespaces, since each namespace inherits fields from base_args.
