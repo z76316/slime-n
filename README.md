@@ -4,7 +4,7 @@
 
 ### A Multi-Policy, Multi-Agent RL Framework
 
-### One config. Any mix of training, inference, and engines. From 1 policy to 100+.
+### One config. Any mix of training, inference engines. From 1 policy to 100+.
 </div>
 
 
