@@ -70,15 +70,18 @@ TRAIN_ARGS=(
 # Without --colocate, no offload/onload is required between train and rollout.
 
 EVAL_ARGS=(
-   --n-samples-per-eval-prompt 16
+   # AIME-2024 via eval_config.yaml (per-dataset rm_type / n_samples).
+   # Phase 0 limits: solver's engine only; metrics tagged eval/aime/* (no per-policy split).
+   --eval-interval 2
+   --eval-config "${SCRIPT_DIR}/eval_config.yaml"
    --eval-max-response-len 16384
    --eval-top-p 1
 )
 
 WANDB_ARGS=(
-   #--use-wandb
-   # --wandb-project slime-dev
-   # --wandb-group qwen3-0.6B-solver-summarizer
+   --use-wandb
+   --wandb-project slime-dev
+   --wandb-group qwen3-0.6B-solver-summarizer
 )
 
 # sglang server args are per-policy in config.yaml (sglang sub-block).

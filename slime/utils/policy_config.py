@@ -463,6 +463,18 @@ class PolicyConfig:
     label_key: str | None = None
     apply_chat_template: bool | None = None
 
+    # ── per-policy eval ──
+    # List of EvalDatasetConfig dicts (same shape as entries under
+    # `eval.datasets` in an `--eval-config` file). When set, this policy
+    # is evaluated on those datasets through its own SGLang engine;
+    # metrics tag as `eval/<policy_name>/<dataset>/...`. None → this
+    # policy is not evaluated directly; an `--eval-config` entry with
+    # `policies: [<name>]` can still target it via fan-out.
+    #
+    # Lives at the top level of the policy entry in YAML, not inside
+    # `megatron:` / `sglang:`. Rejected at parse time if placed there.
+    eval_datasets: list[dict] | None = None
+
 
 def has_sglang_engine(cfg: PolicyConfig) -> bool:
     """True iff the policy hosts an SGLang engine.
@@ -546,21 +558,27 @@ def parse_policy_configs(config_path: str) -> list[PolicyConfig]:
         # CLI global — same silent-wrong-prompt class as the megatron
         # case but harder to spot.
         sglang_block_raw = entry.get("sglang") or {}
+        # Same misplacement-guard pattern for `eval_datasets`: it's a
+        # top-level field, but if a user puts it under `megatron:` it
+        # silently shadows the top-level via the merge order, and under
+        # `sglang:` it would be swallowed into the sglang sub-block and
+        # never reach PolicyConfig.eval_datasets.
+        _TOP_LEVEL_ONLY_KEYS = POLICY_DATA_VIEW_KEYS + ("eval_datasets",)
         nested_misplaced = {
-            "megatron": [k for k in POLICY_DATA_VIEW_KEYS if k in megatron_block],
-            "sglang": [k for k in POLICY_DATA_VIEW_KEYS if k in sglang_block_raw],
+            "megatron": [k for k in _TOP_LEVEL_ONLY_KEYS if k in megatron_block],
+            "sglang": [k for k in _TOP_LEVEL_ONLY_KEYS if k in sglang_block_raw],
         }
         for nest_name, keys in nested_misplaced.items():
             if keys:
                 raise ValueError(
-                    f"{entry.get('name', '<unnamed>')}: data-view keys "
+                    f"{entry.get('name', '<unnamed>')}: keys "
                     f"{keys} must be top-level policy entries, not under "
-                    f"`{nest_name}:`. They describe the rollout data source, "
-                    "not the Megatron actor or SGLang engine."
+                    f"`{nest_name}:`. They describe the rollout data source "
+                    "or eval routing, not the Megatron actor or SGLang engine."
                 )
 
         megatron_known = {
-            k: v for k, v in megatron_block.items() if k in known_field_names and k not in POLICY_DATA_VIEW_KEYS
+            k: v for k, v in megatron_block.items() if k in known_field_names and k not in _TOP_LEVEL_ONLY_KEYS
         }
         megatron_extras = {k: v for k, v in megatron_block.items() if k not in known_field_names}
 
@@ -595,6 +613,10 @@ def parse_policy_configs(config_path: str) -> list[PolicyConfig]:
             # when the key is actually present in YAML so we can later tell
             # "explicitly null" from "omitted" if needed.
             **{k: entry[k] for k in POLICY_DATA_VIEW_KEYS if k in entry},
+            # eval_datasets is also top-level. None = "this policy is not
+            # evaluated directly"; an --eval-config entry with `policies:`
+            # fan-out can still target it.
+            **({"eval_datasets": entry["eval_datasets"]} if "eval_datasets" in entry else {}),
             **megatron_known,
             "extra_megatron_args": megatron_extras or None,
             "sglang": sglang_block,
@@ -659,21 +681,17 @@ def _build_policy_data_views(configs: list[PolicyConfig], base_args) -> dict[str
 
 
 def _guard_data_views_not_yet_wired_to_rollout(configs: list[PolicyConfig]) -> None:
-    """Fail-fast guard while Phase B is unlanded.
+    """Reject per-policy data-view declarations until the rollout side reads them.
 
-    Phase A wires per-policy `input_key` / `label_key` / `apply_chat_template`
-    into the per-policy *training-actor* namespace via `config_to_namespace`,
-    but Phase B hasn't landed yet — `RolloutDataSource` still builds its
-    `Dataset` from the global `args.input_key`, so a policy that declares
-    `input_key: solver_prompt` would have its training side honor the
-    override while rollout-side prompts silently keep reading the CLI
-    global. That's a silent-wrong-prompt footgun.
+    `config_to_namespace` projects per-policy `input_key` / `label_key` /
+    `apply_chat_template` onto each policy's training-actor namespace,
+    but `RolloutDataSource` still builds its `Dataset` from the global
+    `args.input_key`. A policy that declared `input_key: solver_prompt`
+    would have the override honored on the Megatron-actor side while
+    the rollout silently kept reading the CLI global — a wrong-prompt
+    footgun with no error path.
 
-    Until the row-backed multi-view data-source path lands (see
-    plan_data_json_format.md, Phase B), reject any policy that declares
-    one of these fields with a clear pointer to the plan.
-
-    Remove this guard once Phase B is in.
+    Remove this guard when the row-backed multi-view data source lands.
     """
     offenders = [(cfg.name, [k for k in POLICY_DATA_VIEW_KEYS if getattr(cfg, k) is not None]) for cfg in configs]
     offenders = [(name, keys) for (name, keys) in offenders if keys]
@@ -684,9 +702,8 @@ def _guard_data_views_not_yet_wired_to_rollout(configs: list[PolicyConfig]) -> N
             f"apply_chat_template) are not yet wired to RolloutDataSource. "
             f"Policies that declare them ({details}) would have the override "
             "honored only on the Megatron-actor side while the rollout still "
-            "reads the CLI global. See plan_data_json_format.md (Phase B). "
-            "Workaround: don't declare these fields until Phase B lands; "
-            "use the global --input-key / --label-key / --apply-chat-template."
+            "reads the CLI global. Workaround: use the global "
+            "--input-key / --label-key / --apply-chat-template."
         )
 
 
@@ -714,6 +731,172 @@ def _validate_shared_buffer_data_view_consistency(configs: list[PolicyConfig], b
                 f"shared-buffer policies must agree on resolved {key!r} "
                 f"(override else inherited CLI global): {per_policy}"
             )
+
+
+def build_per_policy_eval_datasets(configs: list[PolicyConfig], base_args) -> dict[str, list]:
+    """Resolve per-policy eval datasets from PolicyConfig and base_args.
+
+    Merges three sources in precedence order (per-policy dedupe by name;
+    first-seen wins):
+
+      1. `cfg.eval_datasets` (top-level YAML field on `PolicyConfig`).
+         The policy named in `cfg.name` owns these.
+      2. `base_args.eval_datasets` (the global resolved list from
+         `--eval-config` or `--eval-prompt-data`). Each dataset's
+         optional `policies: [...]` field names which policies receive
+         that dataset (fan-out).
+      3. Legacy fallback — when nothing in (1) or (2) names any policy,
+         and `base_args.eval_datasets` is non-empty, the first
+         trainable-paired policy (engine-hosting, trainable=True)
+         inherits all global datasets. Matches single-policy behavior.
+
+    Returns `dict[policy_name, list[EvalDatasetConfig]]`. Every policy
+    appears as a key — including frozen producers and SGLang-only
+    judges — but the value is `[]` for policies that aren't evaluated.
+    The caller iterates only over non-empty entries.
+    """
+    from slime.utils.eval_config import EvalDatasetConfig
+
+    out: dict[str, list[EvalDatasetConfig]] = {cfg.name: [] for cfg in configs}
+    by_name: dict[str, PolicyConfig] = {cfg.name: cfg for cfg in configs}
+
+    def _to_config(entry) -> EvalDatasetConfig:
+        if isinstance(entry, EvalDatasetConfig):
+            return entry
+        # Raw dict from PolicyConfig.eval_datasets. Strip the cross-policy
+        # `policies:` fan-out field if a user copy-pasted an --eval-config
+        # entry — under PolicyConfig it has no meaning.
+        d = {k: v for k, v in entry.items() if k != "policies"}
+        return EvalDatasetConfig(**d)
+
+    # Per-policy declarations.
+    declared_any = False
+    for cfg in configs:
+        if cfg.eval_datasets:
+            for raw in cfg.eval_datasets:
+                out[cfg.name].append(_to_config(raw))
+            declared_any = True
+
+    # Global datasets with fan-out.
+    global_datasets = list(getattr(base_args, "eval_datasets", None) or [])
+    for ds in global_datasets:
+        target_policies = getattr(ds, "policies", None)
+        if not target_policies:
+            continue
+        for name in target_policies:
+            if name not in by_name:
+                raise ValueError(
+                    f"eval-config dataset {ds.name!r} fans out to policy "
+                    f"{name!r}, which is not in policy_configs. Known policies: "
+                    f"{sorted(by_name)}."
+                )
+            if not has_sglang_engine(by_name[name]):
+                raise ValueError(
+                    f"eval-config dataset {ds.name!r} fans out to policy "
+                    f"{name!r}, which has no SGLang engine "
+                    f"(sglang_num_nodes == 0). Eval through a policy that "
+                    "owns a generation engine, or omit it from `policies:`."
+                )
+            # Dedupe by name within a policy's resolved list (per-policy
+            # declarations win over fan-out on duplicate).
+            if not any(existing.name == ds.name for existing in out[name]):
+                out[name].append(ds)
+        declared_any = True
+
+    # Legacy fallback.
+    if not declared_any and global_datasets:
+        for cfg in configs:
+            if cfg.trainable and has_sglang_engine(cfg):
+                out[cfg.name] = list(global_datasets)
+                break
+
+    return out
+
+
+def _validate_eval_datasets_require_sglang_engine(configs: list[PolicyConfig]) -> None:
+    """A policy that declares `eval_datasets` must own an SGLang engine.
+
+    Eval generation needs an SGLang router URL; a Megatron-only policy
+    (PPO critic, frozen Megatron teacher) has none. The fan-out path
+    in `build_per_policy_eval_datasets` has the same engine check for
+    `--eval-config` `policies: [...]` entries.
+    """
+    offenders = [cfg.name for cfg in configs if cfg.eval_datasets and not has_sglang_engine(cfg)]
+    if offenders:
+        raise ValueError(
+            f"policies {offenders} declare `eval_datasets` but have no "
+            "SGLang engine (sglang_num_nodes == 0). Move the datasets to a "
+            "sibling that has an engine, or use `policies: [<name>]` fan-out "
+            "in your --eval-config file to evaluate the same dataset through "
+            "another policy's engine."
+        )
+
+
+def _guard_eval_not_yet_wired_to_rollout(
+    configs: list[PolicyConfig],
+    per_policy_eval_datasets: dict[str, list],
+    base_args=None,
+) -> None:
+    """Reject per-policy eval declarations until the rollout driver reads them.
+
+    `build_per_policy_eval_datasets` resolves and validates the per-policy
+    map, but `RolloutManager.eval` still posts to a single global router,
+    encodes with a single tokenizer, and tags metrics under one namespace.
+    A per-policy declaration would be honored by the resolver but silently
+    ignored at the eval call site.
+
+    Rejects three shapes of explicit per-policy intent:
+      - `PolicyConfig.eval_datasets` set on any policy (direct
+        per-policy declaration);
+      - any `--eval-config` entry with a non-empty `policies:` field
+        (explicit fan-out, even if it targets only the default
+        trainable-paired policy — the resolved map alone can't tell
+        explicit single-target fan-out from legacy fallback);
+      - resolved map sends datasets to more than one policy, or to a
+        non-default target.
+
+    The legacy single-target case (the first trainable-paired policy
+    inherits global datasets with no `policies:` field anywhere) passes
+    through.
+
+    Remove this guard when per-policy iteration in `RolloutManager.eval`
+    is in.
+    """
+    declared = [cfg.name for cfg in configs if cfg.eval_datasets]
+
+    # Explicit fan-out lives on the SOURCE dataset, not on the resolved
+    # map. A user who writes `policies: [<first_trainable_paired>]`
+    # produces a resolved map identical to legacy fallback, so the only
+    # honest detector inspects base_args.eval_datasets itself.
+    fan_out_datasets: list[str] = []
+    if base_args is not None:
+        for ds in getattr(base_args, "eval_datasets", None) or []:
+            if getattr(ds, "policies", None):
+                fan_out_datasets.append(getattr(ds, "name", "<unnamed>"))
+
+    policies_with_datasets = [name for name, ds in per_policy_eval_datasets.items() if ds]
+    multi_target = len(policies_with_datasets) > 1
+    non_default_target = False
+    if policies_with_datasets:
+        first_trainable_paired = next(
+            (cfg.name for cfg in configs if cfg.trainable and has_sglang_engine(cfg)),
+            None,
+        )
+        non_default_target = any(name != first_trainable_paired for name in policies_with_datasets)
+
+    if declared or fan_out_datasets or multi_target or non_default_target:
+        raise NotImplementedError(
+            "per-policy eval (PolicyConfig.eval_datasets or --eval-config "
+            "`policies:` fan-out) is not yet wired to RolloutManager.eval. "
+            "The resolver builds the per-policy map but the eval call site "
+            "still uses a single router / tokenizer / metric namespace. "
+            "Workaround: keep eval on the global --eval-config or "
+            "--eval-prompt-data path, with no per-policy `eval_datasets` "
+            "and no `policies:` fan-out. "
+            f"Offenders: declared={declared or 'none'}, "
+            f"fan_out_datasets={fan_out_datasets or 'none'}, "
+            f"policies_with_datasets={policies_with_datasets}."
+        )
 
 
 def _validate_shared_buffer_consistency(configs: list[PolicyConfig]) -> None:

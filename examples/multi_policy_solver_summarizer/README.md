@@ -9,6 +9,7 @@ Two trainable paired policies cooperate on math problems (DAPO-math-17k). The **
 ## Files
 
 * `config.yaml`: solver + summarizer policy schema (both trainable, paired with their own SGLang engines).
+* `eval_config.yaml`: AIME-2024 eval-dataset config (rm_type, n_samples). Consumed via `--eval-config`.
 * `run-qwen3-0.6B-solver-summarizer.sh`: launch script (ray start + train_multi_policy.py).
 * `agent_system.py`: per-prompt rollout orchestration (solver → summarizer dispatch).
 * `rollout_with_multi_agents.py`: top-level multi-agent rollout entrypoint.
@@ -26,6 +27,18 @@ bash examples/multi_policy_solver_summarizer/run-qwen3-0.6B-solver-summarizer.sh
 * Pipeline (N=4 trajectories per prompt): N solvers run in parallel → N summarizers that each see all N solver candidates and synthesize a final answer.
 * Reward: solver gets RLVR correctness on its own response; summarizer gets correctness on its synthesized answer (graded directly, no index lookup). Group shaping multiplies both roles by 1.2 if mean parsed-summarizer reward > 0.5, else by 0.8. If the summarizer phase fails entirely, raw rewards are preserved (anti-train guard).
 * Each policy has its own buffer (`buffer_mode: split`), routed by `Sample.policy_name`. `n_samples_per_prompt = num_parallel = 4` for GRPO group-norm.
+
+
+## Eval
+
+Every `--eval-interval=2` rollouts, AIME-2024 (30 prompts) is evaluated by running the full solver→summarizer chain on each prompt. Each prompt produces `num_parallel=4` summarizer attempts, so the eval is effectively pass@4 on the summarizer phase (~120 generations total, ~5 min at temp=1).
+
+Set the dataset path in `eval_config.yaml` (default `/root/aime-2024/aime-2024.jsonl`) and the grader (`rm_type: deepscaler`). The eval config is plumbed through `--eval-config`.
+
+**Two known limitations** of this eval path (resolved by per-policy eval in `plan_eval.md` Phase A–C):
+
+1. **Engine routing.** Eval generation flows through whichever SGLang engine the global router points at — in this config that's the solver's engine, by `config.yaml` ordering. Per-policy engine routing is not yet configurable.
+2. **Metric namespacing.** Metrics dump as `eval/aime/<metric>`, not `eval/<policy_name>/aime/<metric>`. The summarizer's metrics still come out of the chain (the custom rollout runs solver→summarizer on each eval prompt) but they're tagged under the same global namespace as the solver's — no way to tell them apart in W&B until per-policy eval lands.
 
 
 ## Results

@@ -15,7 +15,10 @@ from slime.utils.logging_utils import configure_logger, finish_tracking, init_tr
 from slime.utils.misc import should_run_periodic_action
 from slime.utils.policy_config import (
     _guard_data_views_not_yet_wired_to_rollout,
+    _guard_eval_not_yet_wired_to_rollout,
+    _validate_eval_datasets_require_sglang_engine,
     _validate_shared_buffer_data_view_consistency,
+    build_per_policy_eval_datasets,
     build_sglang_config_from_policies,
     config_to_namespace,
     derive_cluster_sizing,
@@ -114,16 +117,50 @@ def parse_multi_policy_args():
     config_path = _preparse_config()
     policy_configs = parse_policy_configs(config_path)
 
-    # Defer global Megatron structural / HF validation — arch is
-    # per-policy YAML, not global CLI. Per-policy validation happens
-    # inside `config_to_namespace`.
-    base_args = parse_args(skip_megatron_model_validation=True)
+    # Defer two assertions the global parser can't make in multi-policy
+    # mode: Megatron arch validation (per-policy YAML, not global CLI;
+    # runs inside config_to_namespace), and the --eval-interval ⇒
+    # eval_datasets assertion (per-policy eval datasets live on each
+    # PolicyConfig and aren't visible to the global parser; re-asserted
+    # below after build_per_policy_eval_datasets).
+    # TODO(multi-policy): consolidate skip_* into one defer kwarg when a
+    # third deferred check shows up.
+    base_args = parse_args(
+        skip_megatron_model_validation=True,
+        skip_eval_dataset_validation=True,
+    )
 
-    # Until Phase B (row-backed multi-view rollout data source) lands,
-    # reject any policy that declares input_key / label_key /
-    # apply_chat_template — the override would be honored on the
-    # Megatron-actor side but silently ignored on the rollout side.
-    # Remove this guard when Phase B is in.
+    # Per-policy eval datasets require their policy to own an SGLang engine.
+    _validate_eval_datasets_require_sglang_engine(policy_configs)
+
+    # Merge PolicyConfig.eval_datasets with --eval-config entries (incl.
+    # `policies:` fan-out) into a per-policy map. Runs here because the
+    # fan-out source is base_args.eval_datasets, populated by parse_args.
+    per_policy_eval_datasets = build_per_policy_eval_datasets(policy_configs, base_args)
+    base_args.per_policy_eval_datasets = per_policy_eval_datasets
+
+    # Deferred --eval-interval assertion: needs at least one non-empty
+    # per-policy dataset list after resolution.
+    if base_args.eval_interval is not None:
+        if not any(per_policy_eval_datasets.values()):
+            raise AssertionError(
+                "Evaluation datasets must be configured when eval_interval is "
+                "set. In multi-policy mode, set `eval_datasets:` per policy "
+                "or use `--eval-config` with `policies:` fan-out."
+            )
+
+    # Reject per-policy eval declarations until RolloutManager.eval reads
+    # them — currently it still uses a single router / tokenizer / metric
+    # namespace, so a declaration would be silently ignored at the call
+    # site. Remove this guard when per-policy iteration lands.
+    _guard_eval_not_yet_wired_to_rollout(policy_configs, per_policy_eval_datasets, base_args)
+
+    # Reject per-policy input_key / label_key / apply_chat_template
+    # declarations until RolloutDataSource reads them — currently it
+    # builds its Dataset from the global args.input_key, so a declaration
+    # would be honored on the Megatron-actor side but silently ignored on
+    # the rollout side. Remove this guard when the row-backed multi-view
+    # data source lands.
     _guard_data_views_not_yet_wired_to_rollout(policy_configs)
 
     # Shared-buffer data-view consistency. Runs HERE (not in

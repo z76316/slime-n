@@ -89,15 +89,18 @@ TRAIN_ARGS=(
 # (slime/utils/arguments.py:1777-1781).
 
 EVAL_ARGS=(
-   --n-samples-per-eval-prompt 16
+   # AIME-2024 via eval_config.yaml (per-dataset rm_type / n_samples).
+   # Phase 0 limits: solver's engine only; metrics tagged eval/aime/* (no per-policy split).
+   --eval-interval 2
+   --eval-config "${SCRIPT_DIR}/eval_config.yaml"
    --eval-max-response-len 16384
    --eval-top-p 1
 )
 
 WANDB_ARGS=(
-   #--use-wandb
-   # --wandb-project slime-dev
-   # --wandb-group qwen3-0.6B-solver-summarizer-colocate
+   --use-wandb
+   --wandb-project slime-dev
+   --wandb-group qwen3-0.6B-solver-summarizer-colocate
 )
 
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}

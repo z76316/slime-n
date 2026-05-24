@@ -1,0 +1,36 @@
+# Eval config for multi_policy_solver_summarizer (Phase 0, see plan_eval.md).
+#
+# Why a yaml file instead of just `--eval-prompt-data aime <path>`:
+# `EvalDatasetConfig.rm_type` defaults to None and there is no entry in
+# slime/utils/eval_config.py::DATASET_RUNTIME_SPECS that would fall back to
+# args.rm_type. The CLI `--eval-prompt-data` form has no syntax for setting
+# rm_type per dataset — only `--eval-config` does. Without an explicit
+# rm_type, eval samples land at the grader with no rm_type in their metadata
+# and the deepscaler verifier never fires; rewards stay at the placeholder
+# values. So this file exists.
+#
+# n_samples_per_eval_prompt is 1 because the custom rollout already emits
+# num_parallel=4 trajectories per call (solver phase) plus 4 (summarizer
+# phase) — n=1 here gives pass@4 on the summarizer phase, which is enough
+# for a smoke signal on AIME-2024 (30 prompts × 4 = 120 generations per
+# eval, ~5 min at temp=1).
+#
+# Limitations of this Phase 0 eval path (resolved by plan_eval.md Phase
+# A–C):
+#   1. Engine routing — generation flows through whichever SGLang engine
+#      the global router happened to point at (the solver's, by config
+#      order in config.yaml). Per-policy engine routing is not yet
+#      configurable.
+#   2. Metric namespacing — metrics dump as `eval/aime/<metric>`. The
+#      summarizer's metrics still come out of the chain (the custom
+#      rollout runs solver → summarizer on each eval prompt) but they're
+#      tagged under the same global namespace as the solver's. No way to
+#      tell solver-side and summarizer-side metrics apart in W&B until
+#      per-policy eval lands.
+
+eval:
+  datasets:
+    - name: aime
+      path: /root/aime-2024/aime-2024.jsonl
+      rm_type: deepscaler
+      n_samples_per_eval_prompt: 1

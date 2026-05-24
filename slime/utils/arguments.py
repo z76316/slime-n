@@ -1439,7 +1439,13 @@ def _pre_parse_mode():
     return temp_args
 
 
-def parse_args(add_custom_arguments=None, skip_megatron_model_validation: bool = False):
+def parse_args(
+    add_custom_arguments=None,
+    # TODO(multi-policy): consolidate skip_* into one defer kwarg when a
+    # third deferred check shows up.
+    skip_megatron_model_validation: bool = False,
+    skip_eval_dataset_validation: bool = False,
+):
     # Users may call `parse_args` very early, thus we ensure logger is configured here
     configure_logger()
 
@@ -1474,7 +1480,7 @@ def parse_args(add_custom_arguments=None, skip_megatron_model_validation: bool =
         for key, value in vars(sglang_ns).items():
             setattr(args, key, value)
 
-    slime_validate_args(args)
+    slime_validate_args(args, skip_eval_dataset_validation=skip_eval_dataset_validation)
 
     if pre.train_backend == "megatron" and not args.debug_rollout_only and not skip_megatron_model_validation:
         megatron_validate_args(args)
@@ -1609,8 +1615,11 @@ def _resolve_eval_datasets(args) -> list[EvalDatasetConfig]:
     return eval_datasets
 
 
-def slime_validate_args(args):
+def slime_validate_args(args, skip_eval_dataset_validation: bool = False):
+    # TODO(multi-policy): consolidate skip_* kwargs into one defer flag
+    # when a third deferred check shows up.
     args.eval_datasets = _resolve_eval_datasets(args)
+    args._skip_eval_dataset_validation = skip_eval_dataset_validation
 
     if args.use_slime_router:
         logger.warning(
@@ -1688,7 +1697,12 @@ def slime_validate_args(args):
                 args.ckpt_step = args.ref_ckpt_step
             args.start_rollout_id = 0
 
-    if args.eval_interval is not None:
+    if args.eval_interval is not None and not skip_eval_dataset_validation:
+        # Multi-policy mode defers this assertion to
+        # train_multi_policy.parse_multi_policy_args, which runs it
+        # after the per-policy eval-dataset resolver has merged
+        # PolicyConfig.eval_datasets with --eval-config entries. The
+        # global parser doesn't see those per-policy entries here.
         assert args.eval_datasets, "Evaluation datasets must be configured when eval_interval is set."
 
     if args.save_interval is not None:

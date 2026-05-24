@@ -105,6 +105,18 @@ class EvalDatasetConfig:
     tool_key: str | None = None
     metadata_key: str | None = None
 
+    # ── multi-policy eval fan-out ──
+    # When set, this dataset is evaluated by each named policy. Each
+    # policy gets its own per-policy eval call with metrics tagged under
+    # `eval/<policy_name>/<dataset>/...`. None → the first
+    # trainable-paired policy inherits the dataset (legacy single-policy
+    # behavior).
+    #
+    # Read by the multi-policy resolver (`build_per_policy_eval_datasets`).
+    # Legacy single-policy `_resolve_eval_datasets` / `slime_validate_args`
+    # ignore it.
+    policies: list[str] | None = None
+
     n_samples_per_eval_prompt: int | None = None
 
     temperature: float | None = None
