@@ -105,11 +105,12 @@ def _eval_one_dataset(args: Namespace, dataset_cfg) -> dict[str, dict[str, list[
         sample = copy.deepcopy(prompt_sample)
         sample.metadata = dataset_cfg.inject_metadata(getattr(sample, "metadata", None))
         chain = await generate_with_multi_agents(args, sample, sampling_params, evaluation=True)
-        # Use the unscaled RM verdict that agent_system stashes in metadata
-        # before reward_adjustment applies the 0.8/1.2 training weights;
-        # s.reward at this point is the scaled value, useless for pass-rate.
-        solver = [s.metadata.get("raw_reward", s.reward) for s in chain if s.policy_name == "solver"]
-        summarizer = [s.metadata.get("raw_reward", s.reward) for s in chain if s.policy_name == "summarizer"]
+        # Return real Sample objects (not just rewards) so we can attach
+        # them to each emitted dataset; _save_debug_rollout_data and
+        # compute_metrics_from_samples both require info["samples"] to
+        # exist and be a non-empty list of Samples.
+        solver = [s for s in chain if s.policy_name == "solver"]
+        summarizer = [s for s in chain if s.policy_name == "summarizer"]
         return solver, summarizer
 
     async def gather_all():
@@ -124,17 +125,27 @@ def _eval_one_dataset(args: Namespace, dataset_cfg) -> dict[str, dict[str, list[
 
     solver_rewards_per_prompt: list[list[float]] = []
     summarizer_rewards_per_prompt: list[list[float]] = []
+    solver_samples_flat: list[Any] = []
+    summarizer_samples_flat: list[Any] = []
     for solver, summarizer in run(gather_all()):
         if solver:
-            solver_rewards_per_prompt.append(solver)
+            solver_rewards_per_prompt.append([s.metadata.get("raw_reward", s.reward) for s in solver])
+            solver_samples_flat.extend(solver)
         if summarizer:
-            summarizer_rewards_per_prompt.append(summarizer)
+            summarizer_rewards_per_prompt.append([s.metadata.get("raw_reward", s.reward) for s in summarizer])
+            summarizer_samples_flat.extend(summarizer)
 
     base = dataset_cfg.name
     out: dict[str, dict[str, list[Any]]] = {}
     for k in _PASSK_KS:
-        out[f"{base}_summarizer_pass{k}"] = _ds(_pass_at_k_per_prompt(summarizer_rewards_per_prompt, k))
-        out[f"{base}_solver_pass{k}"] = _ds(_pass_at_k_per_prompt(solver_rewards_per_prompt, k))
+        out[f"{base}_summarizer_pass{k}"] = _ds(
+            _pass_at_k_per_prompt(summarizer_rewards_per_prompt, k),
+            summarizer_samples_flat,
+        )
+        out[f"{base}_solver_pass{k}"] = _ds(
+            _pass_at_k_per_prompt(solver_rewards_per_prompt, k),
+            solver_samples_flat,
+        )
     return out
 
 
@@ -165,10 +176,17 @@ def _pass_at_k_per_prompt(rewards_per_prompt: list[list[float]], k: int) -> list
     return out
 
 
-def _ds(rewards: list[float]) -> dict[str, list[Any]]:
-    # Omit `samples`: compute_metrics_from_samples needs Sample objects with
-    # response_length stats, and we have aggregates (one value per prompt).
+def _ds(rewards: list[float], samples: list) -> dict[str, list[Any]]:
+    from slime.utils.types import Sample
+
+    # Same `samples` list (real Sample objects) attached to every pass@k
+    # variant per role. _save_debug_rollout_data requires the "samples"
+    # key to exist on every emitted dataset, and compute_metrics_from_samples
+    # crashes on an empty list — so attach the full per-role sample list
+    # rather than slicing/omitting it. The 3x duplication in the debug
+    # dump is acceptable given the small per-eval sample count.
     return {
         "rewards": rewards,
-        "truncated": [False] * len(rewards),
+        "truncated": [s.status == Sample.Status.TRUNCATED for s in samples],
+        "samples": samples,
     }
