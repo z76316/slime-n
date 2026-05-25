@@ -29,10 +29,5 @@ async def generate_with_multi_agents(args, sample: Sample, sampling_params, eval
     custom_multi_agent_func = load_function(args.custom_multi_agent_function_path)
     samples = await custom_multi_agent_func(args, sample)
 
-    # Eval reports the chain's final-answer quality; the default logger
-    # would otherwise average solver + summarizer rewards together.
-    if evaluation:
-        samples = [s for s in samples if s.policy_name == "summarizer"]
-
     random.shuffle(samples)
     return samples

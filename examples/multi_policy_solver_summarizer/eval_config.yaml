@@ -1,9 +1,9 @@
 # Yaml form (not --eval-prompt-data) because rm_type must be set per
 # dataset; --eval-prompt-data has no syntax for it.
-# n_samples_per_eval_prompt=1 — rollout_with_multi_agents emits 4
-# summarizer trajectories per prompt (solver samples filtered in eval
-# mode). 30 prompts × 4 = 120 generations per eval; pass@4 on the
-# summarizer phase.
+# n_samples_per_eval_prompt=1 — the chain's per-sample function emits
+# 4 solver + 4 summarizer trajectories per prompt internally. The custom
+# eval function (eval_fn.eval_with_multi_agents) aggregates those into
+# three metrics; see README "Eval".
 
 eval:
   datasets:

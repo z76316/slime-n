@@ -196,6 +196,7 @@ def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None 
         placeholder.policy_name = role
         placeholder.index = next(_INNER_SAMPLE_ID)
         placeholder.reward = 0.0
+        placeholder.metadata = {**(placeholder.metadata or {}), "raw_reward": 0.0}
         placeholder.response_content = None
         placeholder.reason_content = None
         samples.append(placeholder)
@@ -229,6 +230,10 @@ async def run_agent_system(args, sample):
     rewards = await batched_async_rm(args, args.results_dict["solver"])
     for s, r in zip(args.results_dict["solver"], rewards, strict=False):
         s.reward = r
+        # Preserve the unscaled RM verdict; reward_adjustment below
+        # multiplies s.reward by 0.8/1.2 and downstream eval needs the raw
+        # 0/1 signal to compute pass@k.
+        s.metadata["raw_reward"] = r
 
     candidate_solutions = [s.response_content for s in args.results_dict["solver"] if s.response_content is not None]
 
@@ -262,6 +267,7 @@ async def run_agent_system(args, sample):
     summarizer_rewards = await batched_async_rm(args, args.results_dict["summarizer"])
     for s, r in zip(args.results_dict["summarizer"], summarizer_rewards, strict=False):
         s.reward = r
+        s.metadata["raw_reward"] = r
 
     # Group reward shaping: if the summarizer phase produced mostly correct
     # final answers, bonus both roles; otherwise penalize. Mean over ALL

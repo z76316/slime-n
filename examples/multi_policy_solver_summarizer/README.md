@@ -13,6 +13,7 @@ Two trainable paired policies cooperate on math problems (DAPO-math-17k). The **
 * `run-qwen3-0.6B-solver-summarizer.sh`: launch script (ray start + train_multi_policy.py).
 * `agent_system.py`: per-prompt rollout orchestration (solver → summarizer dispatch).
 * `rollout_with_multi_agents.py`: top-level multi-agent rollout entrypoint.
+* `eval_fn.py`: custom eval function — aggregates chain samples into summarizer / solver-mean / solver-max metrics.
 * `prompts.py`: solver / summarizer prompt templates.
 
 ## Quick Start
@@ -31,9 +32,14 @@ bash examples/multi_policy_solver_summarizer/run-qwen3-0.6B-solver-summarizer.sh
 
 ## Eval
 
-Every `--eval-interval` rollouts, the full chain runs on AIME-2024 (30 prompts). The rollout filters to summarizer samples in eval mode, so the reported metric is final-answer pass@4 (30 prompts × 4 = 120 generations per eval). Dataset path and grader live in `eval_config.yaml`.
+Every `--eval-interval` rollouts, the full chain runs on AIME-2024 (30 prompts; 30 × 8 = 240 generations per eval). The custom eval function (`eval_fn.eval_with_multi_agents`, wired via `--eval-function-path`) emits per-attempt **raw** RM rewards (unscaled by the 0.8/1.2 training weights) under two logged datasets:
 
-Two limitations: eval flows through the first-listed policy's SGLang engine (the solver's), and metrics aren't split per-policy in W&B.
+* `eval/aime_summarizer/score` — per-attempt accuracy = `pass@1`.
+* `eval/aime_solver/score` — per-attempt accuracy = `pass@1`.
+
+With `--log-passrate --n-samples-per-eval-prompt 4`, the default logger adds `pass@1`, `pass@2`, `pass@4` for both. The headline final-answer-quality metric is `eval/aime_summarizer-pass@4` (= 1 if any of the 4 summarizer attempts is correct). `eval/aime_solver-pass@4` is the solver best-of-4 skyline. Their difference diagnoses whether the summarizer is synthesizing nontrivially or just aggregating (or destroying) signal the solver produced.
+
+Two limitations: eval generation flows through the first-listed policy's SGLang engine (the solver's), and metrics are split by role name, not by per-policy namespace.
 
 
 ## Results
