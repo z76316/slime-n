@@ -9,9 +9,11 @@ Two trainable paired policies cooperate on math problems (DAPO-math-17k). The **
 ## Files
 
 * `config.yaml`: solver + summarizer policy schema (both trainable, paired with their own SGLang engines).
+* `eval_config.yaml`: AIME-2024 eval-dataset config (rm_type, n_samples). Consumed via `--eval-config`.
 * `run-qwen3-0.6B-solver-summarizer.sh`: launch script (ray start + train_multi_policy.py).
 * `agent_system.py`: per-prompt rollout orchestration (solver → summarizer dispatch).
 * `rollout_with_multi_agents.py`: top-level multi-agent rollout entrypoint.
+* `eval_fn.py`: custom eval function — aggregates chain samples into summarizer / solver-mean / solver-max metrics.
 * `prompts.py`: solver / summarizer prompt templates.
 
 ## Quick Start
@@ -26,6 +28,20 @@ bash examples/multi_policy_solver_summarizer/run-qwen3-0.6B-solver-summarizer.sh
 * Pipeline (N=4 trajectories per prompt): N solvers run in parallel → N summarizers that each see all N solver candidates and synthesize a final answer.
 * Reward: solver gets RLVR correctness on its own response; summarizer gets correctness on its synthesized answer (graded directly, no index lookup). Group shaping multiplies both roles by 1.2 if mean parsed-summarizer reward > 0.5, else by 0.8. If the summarizer phase fails entirely, raw rewards are preserved (anti-train guard).
 * Each policy has its own buffer (`buffer_mode: split`), routed by `Sample.policy_name`. `n_samples_per_prompt = num_parallel = 4` for GRPO group-norm.
+
+
+## Eval
+
+Every `--eval-interval` rollouts, the full chain runs on AIME-2024 (30 prompts; 30 × 8 = 240 generations per eval). The custom eval function (`eval_fn.eval_with_multi_agents`, wired via `--eval-function-path`) computes the unbiased pass@k estimator per prompt from the **raw** RM rewards (unscaled by the 0.8/1.2 training weights) and emits, for k ∈ {1, 2, 4}:
+
+* `eval/aime_summarizer_pass{1,2,4}/score` — summarizer pass@k.
+* `eval/aime_solver_pass{1,2,4}/score` — solver pass@k.
+
+Pass@k is computed in the eval function itself (not via `--log-passrate`) because that global flag would also trigger train-side pass-rate logging, whose group-size assertion doesn't match the chain's `num_parallel × n_samples_per_prompt` per-prompt sample count.
+
+Headline: `aime_summarizer_pass4` (best-of-4 final-answer quality) vs `aime_solver_pass4` (skyline ceiling). Their difference diagnoses whether the summarizer is synthesizing nontrivially or just aggregating (or destroying) signal the solver produced.
+
+Two limitations: eval generation flows through the first-listed policy's SGLang engine (the solver's), and metrics are split by role name, not by per-policy namespace.
 
 
 ## Results

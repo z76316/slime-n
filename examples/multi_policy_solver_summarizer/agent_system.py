@@ -1,15 +1,6 @@
-"""Two-agent multi-policy example: solver + summarizer.
-
-Pipeline (N = num_parallel = n_samples_per_prompt per role):
-  1. Solver:     N parallel solvers each produce a candidate solution.
-  2. Summarizer: N parallel summarizers each see ALL N solver candidates and
-                 synthesize one final answer. Each summarizer's response is
-                 graded directly by the verifiable reward (RLVR — its own
-                 boxed answer is what's scored), so we don't need index-
-                 extraction logic like the selector example does.
-
-Both policies train on their own buffers (split-buffer mode).
-"""
+"""Solver → summarizer chain. N parallel solvers per prompt, then N
+summarizers that each see all N solver candidates. Both roles train
+on their own buffers (split-buffer mode); see README for the reward shape."""
 
 import asyncio
 import itertools
@@ -187,17 +178,11 @@ async def summarize_worker(args, problem_statement, candidate_solutions, worker_
 def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None = None):
     """Top up `args.results_dict[role]` to exactly `target_count` samples.
 
-    The multi-policy training path requires each policy's buffer per rollout
-    to equal global_batch_size (slime's get_data_iterator asserts on this:
-    num_steps_per_rollout = num_local_samples // num_local_gbs). When a phase
-    early-exits or some workers fail, the role's buffer is short and the
-    next training step trips that assertion.
-
-    Pad with zero-reward placeholder samples cloned from an existing role
-    sample (or from `donor_role` when this role has none yet — typically
-    we donate a solver sample so the summarizer pad has valid tokens).
-    Each placeholder gets a fresh unique index so the inside-rollout
-    uniqueness invariants hold.
+    Each rollout must contribute exactly num_parallel samples per role
+    (slime's get_data_iterator asserts num_steps_per_rollout =
+    num_local_samples // num_local_gbs). Pad with zero-reward clones
+    of an existing sample (donor_role if this role has none yet) so a
+    failed phase doesn't trip that assertion downstream.
     """
     samples = args.results_dict[role]
     if len(samples) >= target_count:
@@ -211,18 +196,16 @@ def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None 
         placeholder.policy_name = role
         placeholder.index = next(_INNER_SAMPLE_ID)
         placeholder.reward = 0.0
+        placeholder.metadata = {**(placeholder.metadata or {}), "raw_reward": 0.0}
         placeholder.response_content = None
         placeholder.reason_content = None
         samples.append(placeholder)
 
 
 async def run_agent_system(args, sample):
-    """Run num_parallel solver pipelines + num_parallel summarizer pipelines.
-
-    Returns a flat list of samples tagged with policy_name in {"solver",
-    "summarizer"} so the rollout manager's split-buffer routing fans them
-    out correctly.
-    """
+    """Run num_parallel solvers, then num_parallel summarizers. Returns a flat
+    list tagged with policy_name in {"solver", "summarizer"} for split-buffer
+    routing."""
     args = deepcopy(args)
     args.sample = sample
     args.results_dict = {"solver": [], "summarizer": []}
@@ -247,6 +230,10 @@ async def run_agent_system(args, sample):
     rewards = await batched_async_rm(args, args.results_dict["solver"])
     for s, r in zip(args.results_dict["solver"], rewards, strict=False):
         s.reward = r
+        # Preserve the unscaled RM verdict; reward_adjustment below
+        # multiplies s.reward by 0.8/1.2 and downstream eval needs the raw
+        # 0/1 signal to compute pass@k.
+        s.metadata["raw_reward"] = r
 
     candidate_solutions = [s.response_content for s in args.results_dict["solver"] if s.response_content is not None]
 
@@ -275,16 +262,12 @@ async def run_agent_system(args, sample):
         _pad_role_buffer(args, "summarizer", n, donor_role="solver")
         return args.results_dict["solver"] + args.results_dict["summarizer"]
 
-    # Score each summarizer directly — its synthesized boxed answer is what's
-    # graded by the RM (deepscaler reads sample.response, not response_content),
-    # so no index lookup is required. We DON'T filter on response_content here:
-    # unlike the selector example (where selector reward depends on parsing
-    # `Judgment: IDX` out of response_content), the summarizer's RM grade is
-    # independent of whether `</think>` appears. Filtering would wrongly drop
-    # valid samples that emitted `Answer: \boxed{...}` outside a think block.
+    # Score each summarizer directly on sample.response (no response_content
+    # filter — the RM grade is independent of whether `</think>` appears).
     summarizer_rewards = await batched_async_rm(args, args.results_dict["summarizer"])
     for s, r in zip(args.results_dict["summarizer"], summarizer_rewards, strict=False):
         s.reward = r
+        s.metadata["raw_reward"] = r
 
     # Group reward shaping: if the summarizer phase produced mostly correct
     # final answers, bonus both roles; otherwise penalize. Mean over ALL
