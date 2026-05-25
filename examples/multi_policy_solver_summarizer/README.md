@@ -32,12 +32,14 @@ bash examples/multi_policy_solver_summarizer/run-qwen3-0.6B-solver-summarizer.sh
 
 ## Eval
 
-Every `--eval-interval` rollouts, the full chain runs on AIME-2024 (30 prompts; 30 × 8 = 240 generations per eval). The custom eval function (`eval_fn.eval_with_multi_agents`, wired via `--eval-function-path`) emits per-attempt **raw** RM rewards (unscaled by the 0.8/1.2 training weights) under two logged datasets:
+Every `--eval-interval` rollouts, the full chain runs on AIME-2024 (30 prompts; 30 × 8 = 240 generations per eval). The custom eval function (`eval_fn.eval_with_multi_agents`, wired via `--eval-function-path`) computes the unbiased pass@k estimator per prompt from the **raw** RM rewards (unscaled by the 0.8/1.2 training weights) and emits, for k ∈ {1, 2, 4}:
 
-* `eval/aime_summarizer/score` — per-attempt accuracy = `pass@1`.
-* `eval/aime_solver/score` — per-attempt accuracy = `pass@1`.
+* `eval/aime_summarizer_pass{1,2,4}/score` — summarizer pass@k.
+* `eval/aime_solver_pass{1,2,4}/score` — solver pass@k.
 
-With `--log-passrate --n-samples-per-eval-prompt 4`, the default logger adds `pass@1`, `pass@2`, `pass@4` for both. The headline final-answer-quality metric is `eval/aime_summarizer-pass@4` (= 1 if any of the 4 summarizer attempts is correct). `eval/aime_solver-pass@4` is the solver best-of-4 skyline. Their difference diagnoses whether the summarizer is synthesizing nontrivially or just aggregating (or destroying) signal the solver produced.
+Pass@k is computed in the eval function itself (not via `--log-passrate`) because that global flag would also trigger train-side pass-rate logging, whose group-size assertion doesn't match the chain's `num_parallel × n_samples_per_prompt` per-prompt sample count.
+
+Headline: `aime_summarizer_pass4` (best-of-4 final-answer quality) vs `aime_solver_pass4` (skyline ceiling). Their difference diagnoses whether the summarizer is synthesizing nontrivially or just aggregating (or destroying) signal the solver produced.
 
 Two limitations: eval generation flows through the first-listed policy's SGLang engine (the solver's), and metrics are split by role name, not by per-policy namespace.
 

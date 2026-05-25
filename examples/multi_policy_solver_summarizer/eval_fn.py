@@ -1,18 +1,26 @@
 """Eval for the solver+summarizer chain.
 
-Runs the chain once per AIME prompt and emits two logged datasets,
-each carrying all 4 attempt-level (raw RM) rewards per prompt in
-prompt order so the default eval logger can compute pass@k when
---log-passrate is set:
+Runs the chain once per AIME prompt and emits per-prompt pass@k
+aggregates (k = 1, 2, 4) for both roles, computed from the raw
+(unscaled) RM rewards via the unbiased pass@k estimator. Pass@k is
+computed inside this function rather than via --log-passrate because
+that global flag also triggers train-side pass-rate logging, whose
+assertion (`len(rewards) == rollout_batch_size * n_samples_per_prompt`)
+does not hold in this multi-agent setup: slime calls the chain
+n_samples_per_prompt times per outer prompt and each call returns
+num_parallel samples per role, so the per-role buffer carries
+n_samples_per_prompt * num_parallel samples per prompt.
 
-  eval/aime_summarizer/score        per-attempt accuracy (= pass@1)
-  eval/aime_summarizer-pass@{1,2,4} best-of-k summarizer (any-correct)
-  eval/aime_solver/score            per-attempt accuracy (= pass@1)
-  eval/aime_solver-pass@{1,2,4}     best-of-k solver (any-correct)
+Emitted metrics (per dataset NAME in eval_config.yaml):
 
-The headline final-answer-quality metric is `aime_summarizer-pass@4`
-(= 1 if any of the 4 summarizer attempts is correct). The skyline
-ceiling is `aime_solver-pass@4`. Their difference diagnoses whether
+  eval/<NAME>_summarizer_pass1/score   summarizer pass@1
+  eval/<NAME>_summarizer_pass2/score   summarizer pass@2
+  eval/<NAME>_summarizer_pass4/score   summarizer pass@4 (best-of-4)
+  eval/<NAME>_solver_pass1/score       solver pass@1
+  eval/<NAME>_solver_pass2/score       solver pass@2
+  eval/<NAME>_solver_pass4/score       solver pass@4 (best-of-4, skyline)
+
+Headline: `pass4` for both roles. Their difference diagnoses whether
 the summarizer is synthesizing nontrivially or just aggregating (or
 destroying) signal the solver produced.
 """
@@ -61,9 +69,8 @@ def eval_with_multi_agents(
     """Custom eval function: --eval-function-path points here.
 
     For each eval dataset listed in args.eval_datasets, runs the chain
-    once per prompt and emits one logged dataset per role with all
-    per-attempt rewards in prompt order (so --log-passrate can compute
-    pass@k with group_size=args.n_samples_per_eval_prompt).
+    once per prompt and emits per-prompt pass@k aggregates (k=1,2,4) for
+    both solver and summarizer using the raw RM rewards.
 
     Mirrors the (sync outer, async inner via run()) shape used by
     `generate_rollout` in slime.rollout.sglang_rollout.
@@ -98,48 +105,70 @@ def _eval_one_dataset(args: Namespace, dataset_cfg) -> dict[str, dict[str, list[
         sample = copy.deepcopy(prompt_sample)
         sample.metadata = dataset_cfg.inject_metadata(getattr(sample, "metadata", None))
         chain = await generate_with_multi_agents(args, sample, sampling_params, evaluation=True)
-        # Stable per-role order so the flat per-prompt block lines up with
-        # group_size in compute_pass_rate.
-        solver = [s for s in chain if s.policy_name == "solver"]
-        summarizer = [s for s in chain if s.policy_name == "summarizer"]
+        # Use the unscaled RM verdict that agent_system stashes in metadata
+        # before reward_adjustment applies the 0.8/1.2 training weights;
+        # s.reward at this point is the scaled value, useless for pass-rate.
+        solver = [s.metadata.get("raw_reward", s.reward) for s in chain if s.policy_name == "solver"]
+        summarizer = [s.metadata.get("raw_reward", s.reward) for s in chain if s.policy_name == "summarizer"]
         return solver, summarizer
 
-    async def gather_in_prompt_order():
+    async def gather_all():
         tasks = [asyncio.create_task(run_one(ps)) for ps in dataset.samples]
+        out = []
         pbar = tqdm(total=len(tasks), desc=f"Eval {dataset_cfg.name}")
-        for task in tasks:
-            await task
+        for coro in asyncio.as_completed(tasks):
+            out.append(await coro)
             pbar.update(1)
         pbar.close()
-        return [task.result() for task in tasks]
+        return out
 
-    solver_samples: list = []
-    summarizer_samples: list = []
-    for solver, summarizer in run(gather_in_prompt_order()):
-        solver_samples.extend(solver)
-        summarizer_samples.extend(summarizer)
+    solver_rewards_per_prompt: list[list[float]] = []
+    summarizer_rewards_per_prompt: list[list[float]] = []
+    for solver, summarizer in run(gather_all()):
+        if solver:
+            solver_rewards_per_prompt.append(solver)
+        if summarizer:
+            summarizer_rewards_per_prompt.append(summarizer)
 
     base = dataset_cfg.name
-    return {
-        f"{base}_summarizer": _flat_dataset(summarizer_samples),
-        f"{base}_solver": _flat_dataset(solver_samples),
-    }
-
-
-def _flat_dataset(samples) -> dict[str, list[Any]]:
-    from slime.utils.types import Sample
-
-    # Use the unscaled RM verdict that agent_system.run_agent_system stashes
-    # in metadata before applying the 0.8/1.2 training reward weights;
-    # s.reward at this point is the scaled value, useless for pass-rate.
-    raw_rewards = [s.metadata.get("raw_reward", s.reward) for s in samples]
-    out: dict[str, list[Any]] = {
-        "rewards": raw_rewards,
-        "truncated": [s.status == Sample.Status.TRUNCATED for s in samples],
-    }
-    # Only include samples if non-empty; the eval logger calls
-    # compute_metrics_from_samples on `samples is not None`, which would
-    # crash on np.max([]) when no samples were collected.
-    if samples:
-        out["samples"] = samples
+    out: dict[str, dict[str, list[Any]]] = {}
+    for k in _PASSK_KS:
+        out[f"{base}_summarizer_pass{k}"] = _ds(_pass_at_k_per_prompt(summarizer_rewards_per_prompt, k))
+        out[f"{base}_solver_pass{k}"] = _ds(_pass_at_k_per_prompt(solver_rewards_per_prompt, k))
     return out
+
+
+_PASSK_KS = (1, 2, 4)
+
+
+def _pass_at_k_per_prompt(rewards_per_prompt: list[list[float]], k: int) -> list[float]:
+    """Unbiased pass@k estimator (Chen et al. 2021) computed per prompt.
+
+    For each prompt's n raw 0/1 rewards with c correct,
+      pass@k = 1 - C(n - c, k) / C(n, k)  if (n - c) >= k else 1.
+    """
+    out = []
+    for rewards in rewards_per_prompt:
+        n = len(rewards)
+        c = sum(1 for r in rewards if r == 1)
+        if k > n:
+            # Not enough attempts to evaluate pass@k; skip the prompt.
+            continue
+        if n - c < k:
+            out.append(1.0)
+        else:
+            # 1 - prod_{i=n-c+1..n} (1 - k/i)
+            p = 1.0
+            for i in range(n - c + 1, n + 1):
+                p *= 1.0 - k / i
+            out.append(1.0 - p)
+    return out
+
+
+def _ds(rewards: list[float]) -> dict[str, list[Any]]:
+    # Omit `samples`: compute_metrics_from_samples needs Sample objects with
+    # response_length stats, and we have aggregates (one value per prompt).
+    return {
+        "rewards": rewards,
+        "truncated": [False] * len(rewards),
+    }

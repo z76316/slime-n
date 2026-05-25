@@ -89,14 +89,14 @@ TRAIN_ARGS=(
 # (slime/utils/arguments.py:1777-1781).
 
 EVAL_ARGS=(
-   # AIME-2024 via eval_config.yaml. Custom eval function emits
-   # per-attempt rewards for solver and summarizer (4 attempts/prompt),
-   # so --log-passrate computes pass@1/2/4 per role with group_size=4.
+   # AIME-2024 via eval_config.yaml. Custom eval function emits four
+   # per-prompt aggregates per dataset: best-of-4 and mean for each
+   # role. --log-passrate intentionally not set; it would also trigger
+   # train-side pass-rate logging whose group_size assertion does not
+   # hold when the chain emits num_parallel samples per call.
    --eval-interval 2
    --eval-config "${SCRIPT_DIR}/eval_config.yaml"
    --eval-function-path examples.multi_policy_solver_summarizer.eval_fn.eval_with_multi_agents
-   --log-passrate
-   --n-samples-per-eval-prompt 4
    --eval-max-response-len 16384
    --eval-top-p 1
 )
