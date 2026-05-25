@@ -29,13 +29,8 @@ async def generate_with_multi_agents(args, sample: Sample, sampling_params, eval
     custom_multi_agent_func = load_function(args.custom_multi_agent_function_path)
     samples = await custom_multi_agent_func(args, sample)
 
-    # In eval, return only the summarizer samples (the final-answer role).
-    # Training keeps both solver and summarizer samples so each role's
-    # split buffer gets fed; eval reports pass@k on the chain's actual
-    # output. Without this filter the default eval logger averages
-    # rewards across both roles, producing a mixed solver+summarizer
-    # number under `eval/aime` that doesn't match any single role's
-    # quality.
+    # Eval reports the chain's final-answer quality; the default logger
+    # would otherwise average solver + summarizer rewards together.
     if evaluation:
         samples = [s for s in samples if s.policy_name == "summarizer"]
 

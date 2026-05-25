@@ -1,45 +1,6 @@
-# Two-agent multi-policy config — solver + summarizer, no-colocate sizing.
-#
-# Task: two cooperating policies on math problems (DAPO-math-17k).
-#   Pipeline (N=num_parallel=4 trajectories per role per prompt):
-#     1. solver      — N parallel solvers each produce a candidate solution.
-#     2. summarizer  — N parallel summarizers each see ALL N solver candidates
-#                      and synthesize one final answer (with the standard
-#                      `Answer: \boxed{...}` format).
-#
-#   Reward (verifiable reward / RLVR scores correctness per role, both directly):
-#     - solver: direct correctness reward on its own response.
-#     - summarizer: direct correctness reward on its own synthesized answer
-#       (no index lookup — it's graded like any other completion).
-#     - Group shaping: if mean parsed-summarizer reward > 0.5, both roles'
-#       rewards × correct_reward_weight (1.2); else × incorrect_reward_weight
-#       (0.8). When the summarizer phase fails entirely, raw rewards are
-#       preserved (anti-train guard — broken summarizer must not penalize
-#       correct solvers).
-#
-#   Each policy is its own Megatron actor paired 1:1 with its own sglang engine
-#   (buffer_mode=split routes Sample.policy_name to the matching policy's
-#   buffer; n_samples_per_prompt = num_parallel = 4 for GRPO group-norm).
-#
-# Cluster sizing (no --colocate):
-#   actor_gpus   = sum(megatron_num_nodes * num_gpus_per_node) = 2 × 1 × 1 = 2
-#   rollout_gpus = sum(sglang_num_nodes   * num_gpus_per_node) = 2 × 1 × 1 = 2
-#   total        = actor_gpus + rollout_gpus                   = 4
-#
-# Layout: GPUs 0,1 = solver+summarizer Megatron actors; GPUs 2,3 = sglang engines.
-# No colocate ⇒ no offload/onload between train and rollout (each side has its
-# own GPU). Engines stay loaded throughout.
-#
-# Each entry under `policies:`:
-#   name, role                 — identity (role: actor only in v1)
-#   hf_checkpoint              — base model (HF dir or hub id)
-#   load, save, ref_load       — checkpoint dirs (per-policy)
-#   buffer_mode                — "split" | "shared" (split routes Sample.policy_name)
-#   num_gpus_per_node          — per-policy GPU slice size on each side
-#   megatron_num_nodes         — Megatron actor placement (world_size = nodes × gpus)
-#   sglang_num_nodes           — sglang engine placement for this policy's 1:1 engine
-#   megatron:                  — Megatron training config (parallel, optim, loss, RL)
-#   sglang:                    — sglang engine deployment (server args, server_groups)
+# Solver + summarizer on DAPO-math-17k. Two trainable paired policies.
+# Cluster: 4 GPUs no-colocate (2 Megatron actors + 2 sglang engines).
+# See README for the pipeline / reward shape.
 
 policies:
 

@@ -31,14 +31,9 @@ bash examples/multi_policy_solver_summarizer/run-qwen3-0.6B-solver-summarizer.sh
 
 ## Eval
 
-Every `--eval-interval=2` rollouts, AIME-2024 (30 prompts) is evaluated by running the full solver→summarizer chain on each prompt. `rollout_with_multi_agents.py` filters to summarizer samples only in eval mode, so the reported metric is the final-answer pass@4 (`num_parallel=4` summarizer attempts per prompt; ~120 generations total, ~5 min at temp=1). Without that filter, the default eval logger would average rewards across both solver and summarizer samples and produce a meaningless mixed number.
+Every `--eval-interval` rollouts, the full chain runs on AIME-2024 (30 prompts). The rollout filters to summarizer samples in eval mode, so the reported metric is final-answer pass@4 (30 prompts × 4 = 120 generations per eval). Dataset path and grader live in `eval_config.yaml`.
 
-Set the dataset path in `eval_config.yaml` (default `/root/aime-2024/aime-2024.jsonl`) and the grader (`rm_type: deepscaler`). The eval config is plumbed through `--eval-config`.
-
-**Two known limitations** of this eval path:
-
-1. **Engine routing.** Eval generation flows through whichever SGLang engine the global router points at — in this config that's the solver's engine, by `config.yaml` ordering. Per-policy engine routing is not yet configurable.
-2. **Metric namespacing.** Metrics dump as `eval/aime/<metric>`, not `eval/<policy_name>/aime/<metric>`. The eval-mode filter ensures only summarizer samples reach the logger so the number is meaningful, but it still can't be split per-policy in W&B until per-policy eval routing lands.
+Two limitations: eval flows through the first-listed policy's SGLang engine (the solver's), and metrics aren't split per-policy in W&B.
 
 
 ## Results

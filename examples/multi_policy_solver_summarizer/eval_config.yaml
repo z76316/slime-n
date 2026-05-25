@@ -1,28 +1,9 @@
-# Eval config for multi_policy_solver_summarizer.
-#
-# Why a yaml file instead of `--eval-prompt-data aime <path>`:
-# EvalDatasetConfig.rm_type defaults to None and there is no entry in
-# eval_config.py::DATASET_RUNTIME_SPECS that falls back to args.rm_type.
-# --eval-prompt-data has no syntax for setting rm_type per dataset — only
-# --eval-config does. Without an explicit rm_type the deepscaler verifier
-# never fires and rewards stay at placeholder values.
-#
-# n_samples_per_eval_prompt is 1 because rollout_with_multi_agents.py
-# emits num_parallel=4 trajectories per eval prompt (the summarizer
-# phase only — the solver samples are filtered out in eval mode so the
-# reported metric is the final-answer pass@4, not a solver+summarizer
-# average). 30 prompts × 4 = 120 generations per eval, ~5 min at
-# temp=1.
-#
-# Limitations of this eval path:
-#   1. Engine routing — generation flows through whichever SGLang
-#      engine the global router happens to point at (the solver's, by
-#      config order in config.yaml).
-#   2. Metric namespacing — metrics dump as `eval/aime/<metric>`. The
-#      filter in rollout_with_multi_agents.py ensures only summarizer
-#      samples reach the logger, so the number is meaningful, but it
-#      still can't be split per-policy in W&B until per-policy eval
-#      routing lands.
+# Yaml form (not --eval-prompt-data) because rm_type must be set per
+# dataset; --eval-prompt-data has no syntax for it.
+# n_samples_per_eval_prompt=1 — rollout_with_multi_agents emits 4
+# summarizer trajectories per prompt (solver samples filtered in eval
+# mode). 30 prompts × 4 = 120 generations per eval; pass@4 on the
+# summarizer phase.
 
 eval:
   datasets:
