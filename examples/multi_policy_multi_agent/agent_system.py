@@ -1,5 +1,6 @@
 import asyncio
 import itertools
+import logging
 import re
 import time
 import traceback
@@ -11,6 +12,8 @@ from slime.utils.http_utils import post
 from slime.utils.types import Sample
 
 from .prompts import SOLVER_PROMPT_TEMPLATE, generate_rewriter_template, generate_select_template
+
+logger = logging.getLogger(__name__)
 
 # Unique-index source for inner samples spawned inside run_agent_system; without
 # this, all num_parallel siblings inherit the outer prompt's index and trip
@@ -259,10 +262,8 @@ def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None 
         assert len(set(sum(micro_batch_indices, []))) == num_local_samples
     in slime/backends/megatron_utils/data.py.
 
-    Pad with zero-reward placeholders cloned from an existing role sample
-    (or from `donor_role` when this role has none yet — typically donate
-    a solver sample so selector pad has valid tokens). Each placeholder
-    gets a fresh unique index from _INNER_SAMPLE_ID.
+    Pad with zero-response placeholders so failed phases don't leak donor
+    response tokens/logprobs into another policy's split buffer.
     """
     samples = args.results_dict[role]
     if len(samples) >= target_count:
@@ -270,14 +271,56 @@ def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None 
         return
     donor_pool = samples if samples else (args.results_dict.get(donor_role) or [])
     if not donor_pool:
-        return
+        donor_pool = [args.sample]
+    donor_policy = getattr(donor_pool[0], "policy_name", None)
+    logger.warning(
+        "_pad_role_buffer: role=%s padding %d zero-response placeholder(s) from donor_policy=%s outer_index=%s",
+        role,
+        target_count - len(samples),
+        donor_policy,
+        getattr(args.sample, "index", None),
+    )
+
+    def _prompt_tokens(source: Sample) -> list[int]:
+        tokens = list(getattr(source, "tokens", []) or [])
+        response_length = getattr(source, "response_length", 0) or 0
+        if tokens and response_length > 0:
+            return tokens[:-response_length]
+        if tokens:
+            return tokens
+
+        prompt = getattr(source, "prompt", "")
+        tokenizer = getattr(args, "tokenizer", None)
+        if isinstance(prompt, str) and tokenizer is not None:
+            return tokenizer(prompt, add_special_tokens=False)["input_ids"]
+        return []
+
     while len(samples) < target_count:
-        placeholder = deepcopy(donor_pool[0])
+        donor = donor_pool[0]
+        prompt_tokens = _prompt_tokens(donor)
+        placeholder = deepcopy(donor)
         placeholder.policy_name = role
         placeholder.index = next(_INNER_SAMPLE_ID)
         placeholder.reward = 0.0
+        placeholder.metadata = {
+            **(placeholder.metadata or {}),
+            "raw_reward": 0.0,
+            "is_padding_placeholder": True,
+            "padding_donor_policy": getattr(donor, "policy_name", None),
+        }
+        placeholder.status = Sample.Status.FAILED
+        placeholder.response = ""
+        placeholder.response_length = 0
+        placeholder.loss_mask = []
+        placeholder.remove_sample = True
         placeholder.response_content = None
         placeholder.reason_content = None
+        placeholder.tokens = prompt_tokens
+        # Keep the per-sample field present: train_data collection checks only
+        # the first sample. For a zero-length response, [] is the aligned value.
+        placeholder.rollout_log_probs = []
+        placeholder.rollout_routed_experts = None
+        placeholder.teacher_log_probs = None
         samples.append(placeholder)
 
 
