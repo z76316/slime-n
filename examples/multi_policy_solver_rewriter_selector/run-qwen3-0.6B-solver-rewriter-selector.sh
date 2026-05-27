@@ -77,9 +77,10 @@ TRAIN_ARGS=(
 # Megatron training, orchestration (buffer_mode, GPU placement), and the
 # 1:1-paired sglang engine sub-block.
 
-# Eval routes through one trainable policy (first in megatron_config: solver).
 EVAL_ARGS=(
-   --n-samples-per-eval-prompt 16
+   --eval-interval 2
+   --eval-config "${SCRIPT_DIR}/eval_config.yaml"
+   --eval-function-path examples.multi_policy_solver_rewriter_selector.eval_fn.eval_with_multi_agents
    --eval-max-response-len 16384
    --eval-top-p 1
 )
