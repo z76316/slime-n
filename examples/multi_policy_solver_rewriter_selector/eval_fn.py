@@ -129,7 +129,9 @@ def _eval_one_dataset(args: Namespace, dataset_cfg) -> dict[str, dict[str, list[
                 selector_parse_failure.append(0.0)
                 best_rewriter_reward = max(r_rewards) if r_rewards else 0.0
                 selected_reward = _raw_reward(s)
-                selector_accuracy.append(1.0 if selected_reward >= best_rewriter_reward and best_rewriter_reward > 0 else 0.0)
+                selector_accuracy.append(
+                    1.0 if selected_reward >= best_rewriter_reward and best_rewriter_reward > 0 else 0.0
+                )
 
         solver_truncated.extend([float(s.status == Sample.Status.TRUNCATED) for s in solver])
         rewriter_truncated.extend([float(s.status == Sample.Status.TRUNCATED) for s in rewriter])
