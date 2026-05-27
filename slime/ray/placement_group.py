@@ -352,14 +352,26 @@ def create_training_models_multi(args, pgs, rollout_manager, policy_configs):
         starts[name] = ids[0]
         h.train_group.set_rollout_manager(rollout_manager)
 
-    chosen = min(starts.values())
-    if any(s != chosen for s in starts.values()):
+    # Frozen producers (e.g. OPD Megatron teacher) never save and load from a
+    # fixed ref_load each time, so their reported start_rollout_id is always
+    # 1 (fresh init). Including them in the reconciliation would force the
+    # driver loop back to rollout 0 even when every trainable actor resumed
+    # from a real saved iteration. Reconcile over trainable policies only.
+    trainable_starts = {n: s for n, s in starts.items() if handles[n].config.trainable}
+    reconcile_pool = trainable_starts if trainable_starts else starts
+    chosen = min(reconcile_pool.values())
+    if any(s != chosen for s in reconcile_pool.values()):
         logger.warning(
-            f"start_rollout_ids diverged across policies: {starts}; using min={chosen}. "
+            f"start_rollout_ids diverged across trainable policies: {reconcile_pool}; using min={chosen}. "
             f"User is responsible for ensuring this is intended."
         )
-    if args.start_rollout_id is None:
-        args.start_rollout_id = chosen
+    # In multi-policy mode the per-policy resumed iteration is authoritative
+    # over the global args.start_rollout_id (which slime_validate_args always
+    # forces to 0 when global --load is None — i.e. always, since per-policy
+    # loads live in YAML, not global CLI). Without this overwrite, the driver
+    # loop would restart from rollout 0 even though every actor resumed from
+    # a real saved iteration.
+    args.start_rollout_id = chosen
 
     # Legacy parity: load resumed rollout buffer when --rollout-global-dataset is set
     if args.rollout_global_dataset:
