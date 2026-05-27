@@ -178,9 +178,7 @@ async def _round3_worker(
     chain_id: int,
 ) -> Sample | None:
     try:
-        sample = await PeerAgent().round3(
-            args, problem_statement, own_r1, other_r1, own_r2, other_r2, key=key
-        )
+        sample = await PeerAgent().round3(args, problem_statement, own_r1, other_r1, own_r2, other_r2, key=key)
         if sample is not None:
             sample.metadata["round_number"] = 3
             sample.metadata["chain_id"] = chain_id
@@ -354,13 +352,9 @@ async def run_agent_system(args, sample: Sample) -> list[Sample]:
         vis_a2 = _visible_response(a2) if a2 is not None else "[no response]"
         vis_b2 = _visible_response(b2) if b2 is not None else "[no response]"
 
-        r3_tasks.append(
-            _round3_worker(args, raw_problem, vis_a1, vis_b1, vis_a2, vis_b2, "peer_a", chain_id)
-        )
+        r3_tasks.append(_round3_worker(args, raw_problem, vis_a1, vis_b1, vis_a2, vis_b2, "peer_a", chain_id))
         r3_keys.append(("peer_a", chain_id))
-        r3_tasks.append(
-            _round3_worker(args, raw_problem, vis_b1, vis_a1, vis_b2, vis_a2, "peer_b", chain_id)
-        )
+        r3_tasks.append(_round3_worker(args, raw_problem, vis_b1, vis_a1, vis_b2, vis_a2, "peer_b", chain_id))
         r3_keys.append(("peer_b", chain_id))
 
     r3_results = await asyncio.gather(*r3_tasks, return_exceptions=False)

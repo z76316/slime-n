@@ -133,12 +133,16 @@ def _eval_one_dataset(args: Namespace, dataset_cfg) -> dict[str, dict[str, list[
             peer_b_r3_rewards_pp.append(b_r3)
 
         # pooled round-1 pass@k (direct RM reward, not chain-outcome)
-        r1_pool = [_direct_reward(s) for s in a_by_round.get(1, [])] + [_direct_reward(s) for s in b_by_round.get(1, [])]
+        r1_pool = [_direct_reward(s) for s in a_by_round.get(1, [])] + [
+            _direct_reward(s) for s in b_by_round.get(1, [])
+        ]
         if r1_pool:
             round1_pooled_pp.append(r1_pool)
 
         # pooled round-2 pass@k (direct RM reward, not chain-outcome)
-        r2_pool = [_direct_reward(s) for s in a_by_round.get(2, [])] + [_direct_reward(s) for s in b_by_round.get(2, [])]
+        r2_pool = [_direct_reward(s) for s in a_by_round.get(2, [])] + [
+            _direct_reward(s) for s in b_by_round.get(2, [])
+        ]
         if r2_pool:
             round2_pooled_pp.append(r2_pool)
 
