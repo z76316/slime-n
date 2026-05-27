@@ -18,6 +18,7 @@ Public surface:
     start(...)                       build the aiohttp app + store
     open_session(store, sid, ...)    register a session with sampling defaults
     pop_session_split(store, sid)    drain a session's trajectory for training
+    shutdown_session(sid, ...)       tombstone sid + drain in-flight handlers
     Chain, Session                   dataclasses (exposed for type hints)
 
 Read `_handle_request` (§3) top-to-bottom -- that's the online turn:
@@ -128,6 +129,12 @@ class Session:
 
 
 _Store = dict[str, Session]
+
+
+# Drain state for shutdown_session. Module-level so it survives
+# pop_session_split; _closed is a permanent tombstone (late requests 503).
+_inflight: dict[str, set[asyncio.Task]] = {}
+_closed: set[str] = set()
 
 
 def _make_segment(chain: Chain, kind: str) -> tuple:
@@ -614,20 +621,24 @@ def _start_sub_chain(s: Session, dispatch_id: str) -> None:
 async def _handle_request(request: web.Request) -> web.StreamResponse:
     body = await request.json()
     sid = request.headers["Authorization"].removeprefix("Bearer ").strip()
+    if sid in _closed:  # session drained; refuse stragglers
+        return web.Response(status=503, text="session closed")
     app = request.app
     s = app["store"].setdefault(sid, Session())
-
-    async with s.lock:  # same sid -> serialized
-        target, is_sub, kind = _select_chain(s, body)
-        prompt_ids = _build_prompt(target, body, kind, app["tokenizer"])
-        turn = await _generate(prompt_ids, s, body, app)
-        blocks, stop, did = _build_reply(target, turn.output_ids, turn.finish_reason, app)
-        _record_turn(target, turn)
-        if did and not is_sub:  # sub doesn't nest
-            _start_sub_chain(s, did)
-        in_tok, out_tok = len(prompt_ids), len(turn.output_ids)
-
-    return await _stream_response(request, blocks, stop, in_tok, out_tok)
+    task = asyncio.current_task()
+    _inflight.setdefault(sid, set()).add(task)
+    try:
+        async with s.lock:  # same sid -> serialized
+            target, is_sub, kind = _select_chain(s, body)
+            ideal_ids = _build_prompt(target, body, kind, app["tokenizer"])
+            output_ids, finish = await _generate(target, ideal_ids, s, body, app)
+            blocks, stop, did = _build_reply(target, output_ids, finish, app)
+            if did and not is_sub:  # sub doesn't nest
+                _start_sub_chain(s, did)
+            in_tok, out_tok = len(ideal_ids), len(output_ids)
+        return await _stream_response(request, blocks, stop, in_tok, out_tok)
+    finally:
+        _inflight.get(sid, set()).discard(task)
 
 
 async def _stream_response(request, blocks, stop_reason, in_tok, out_tok) -> web.StreamResponse:
@@ -744,6 +755,22 @@ def pop_session_split(store: _Store, sid: str) -> list[TokenSegment]:
         if segment.response_ids and (max_context_tokens <= 0 or total_tokens <= max_context_tokens):
             out.append(segment)
     return out
+
+
+async def shutdown_session(sid: str, *, wait_timeout: float = 5.0) -> None:
+    """Tombstone sid (late requests 503) and drain in-flight local handlers
+    (cancel fires /abort_request to sglang). Does NOT wait for sglang idle --
+    sglang_engine.release_memory_occupation already calls flush_cache() with
+    60×1s polling. Idempotent."""
+    _closed.add(sid)
+    tasks = [t for t in _inflight.pop(sid, ()) if not t.done()]
+    if not tasks:
+        return
+    _, pending = await asyncio.wait(tasks, timeout=wait_timeout)
+    for t in pending:
+        t.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
 
 
 # Trivial endpoints claude-code probes during a session: count_tokens runs
