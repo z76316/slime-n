@@ -258,10 +258,20 @@ def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None 
         placeholder.reward = 0.0
         placeholder.response = ""
         placeholder.response_length = 0
+        placeholder.loss_mask = []
+        placeholder.remove_sample = True
         placeholder.response_content = None
         placeholder.reason_content = None
         placeholder.tokens = list(getattr(args.sample, "tokens", []) or [])
-        placeholder.rollout_log_probs = None
+        placeholder.rollout_log_probs = []
+        placeholder.rollout_routed_experts = None
+        placeholder.teacher_log_probs = None
+        placeholder.metadata = {
+            **(placeholder.metadata or {}),
+            "raw_reward": 0.0,
+            "is_padding_placeholder": True,
+            "padding_donor_policy": getattr(donor_pool[0], "policy_name", None),
+        }
         # Don't stamp wid on placeholders — they don't represent any logical agent.
         if placeholder.metadata is not None and "wid" in placeholder.metadata:
             placeholder.metadata = {k: v for k, v in placeholder.metadata.items() if k != "wid"}
