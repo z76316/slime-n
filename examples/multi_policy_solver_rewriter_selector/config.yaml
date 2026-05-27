@@ -51,8 +51,8 @@ policies:
     role: actor
 
     hf_checkpoint: /root/Qwen3-0.6B
-    # load: /ckpt/multi_policy_multi_agent/qwen3-0.6b/solver
-    save: /ckpt/multi_policy_multi_agent/qwen3-0.6b/solver
+    # load: /ckpt/multi_policy_solver_rewriter_selector/qwen3-0.6b/solver
+    save: /ckpt/multi_policy_solver_rewriter_selector/qwen3-0.6b/solver
     # ref_load: /ckpt/qwen3-0.6b/ref   # uncomment for KL ref
 
     buffer_mode: split
@@ -134,8 +134,8 @@ policies:
     role: actor
 
     hf_checkpoint: /root/Qwen3-0.6B
-    # load: /ckpt/multi_policy_multi_agent/qwen3-0.6b/rewriter
-    save: /ckpt/multi_policy_multi_agent/qwen3-0.6b/rewriter
+    # load: /ckpt/multi_policy_solver_rewriter_selector/qwen3-0.6b/rewriter
+    save: /ckpt/multi_policy_solver_rewriter_selector/qwen3-0.6b/rewriter
 
     buffer_mode: split
 
@@ -206,8 +206,8 @@ policies:
     role: actor
 
     hf_checkpoint: /root/Qwen3-0.6B
-    # load: /ckpt/multi_policy_multi_agent/qwen3-0.6b/selector
-    save: /ckpt/multi_policy_multi_agent/qwen3-0.6b/selector
+    # load: /ckpt/multi_policy_solver_rewriter_selector/qwen3-0.6b/selector
+    save: /ckpt/multi_policy_solver_rewriter_selector/qwen3-0.6b/selector
 
     buffer_mode: split
 

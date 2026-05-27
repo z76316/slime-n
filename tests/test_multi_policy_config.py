@@ -38,7 +38,7 @@ from slime.utils.policy_config import (
 )
 
 
-EXAMPLE_CONFIG = os.path.join(_REPO_ROOT, "examples", "multi_policy_multi_agent", "config.yaml")
+EXAMPLE_CONFIG = os.path.join(_REPO_ROOT, "examples", "multi_policy_solver_rewriter_selector", "config.yaml")
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -936,8 +936,8 @@ class TestLauncherConsistency:
     LAUNCHER_PATH = os.path.join(
         _REPO_ROOT,
         "examples",
-        "multi_policy_multi_agent",
-        "run-qwen3-0.6B-multi-policy-multi-agent.sh",
+        "multi_policy_solver_rewriter_selector",
+        "run-qwen3-0.6B-solver-rewriter-selector.sh",
     )
     ARGUMENTS_PATH = os.path.join(_REPO_ROOT, "slime", "utils", "arguments.py")
 
@@ -988,8 +988,10 @@ class TestLauncherConsistency:
 
 
 class TestExampleSourceStatic:
-    AGENT_SYSTEM = os.path.join(_REPO_ROOT, "examples", "multi_policy_multi_agent", "agent_system.py")
-    ROLLOUT_FN = os.path.join(_REPO_ROOT, "examples", "multi_policy_multi_agent", "rollout_with_multi_agents.py")
+    AGENT_SYSTEM = os.path.join(_REPO_ROOT, "examples", "multi_policy_solver_rewriter_selector", "agent_system.py")
+    ROLLOUT_FN = os.path.join(
+        _REPO_ROOT, "examples", "multi_policy_solver_rewriter_selector", "rollout_with_multi_agents.py"
+    )
 
     def test_agent_system_imports_get_model_url(self):
         """Edit 1 (URL routing): agent_system.py must import get_model_url from sglang_rollout."""
@@ -1067,11 +1069,31 @@ class TestExampleSourceStatic:
         assert num_parallel == 4, f"num_parallel must be 4, got {num_parallel}"
 
     def test_rollout_fn_points_at_multi_policy_module(self):
-        """The custom_multi_agent_function_path must point at the new multi_policy_multi_agent
+        """The custom_multi_agent_function_path must point at the new multi_policy_solver_rewriter_selector
         package, not the original multi_agent."""
         with open(self.ROLLOUT_FN) as f:
             src = f.read()
-        assert "examples.multi_policy_multi_agent.agent_system.run_agent_system" in src
+        assert "examples.multi_policy_solver_rewriter_selector.agent_system.run_agent_system" in src
+
+    def test_rollout_fn_uses_local_args_copy(self):
+        """Eval must not overwrite the shared rollout manager args."""
+        with open(self.ROLLOUT_FN) as f:
+            src = f.read()
+        assert "from copy import copy" in src
+        assert "local_args = copy(args)" in src
+        assert "local_args.rollout_max_context_len = max_context_length" in src
+
+    def test_agent_system_no_blocking_sleep_in_async_retry(self):
+        with open(self.AGENT_SYSTEM) as f:
+            src = f.read()
+        assert "time.sleep" not in src
+        assert "await asyncio.sleep(1)" in src
+
+    def test_agent_system_does_not_emit_logprobs_for_all_synthetic_role(self):
+        with open(self.AGENT_SYSTEM) as f:
+            src = f.read()
+        assert "role_has_logprobs = any(" in src
+        assert "placeholder.rollout_log_probs = [] if role_has_logprobs else None" in src
 
 
 class TestMultiPolicyWiringStatic:
