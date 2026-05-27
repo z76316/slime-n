@@ -151,9 +151,7 @@ class OrchestratorAgent(Agent):
         body = ORCHESTRATOR_PLAN_TEMPLATE.format(problem_statement=problem_statement)
         return await self.run(args, _wrap_user_turn(args.tokenizer, body), key="orchestrator", max_retries=3)
 
-    async def synthesize(
-        self, args, problem_statement: str, plan_text: str, results: list[str]
-    ) -> Sample | None:
+    async def synthesize(self, args, problem_statement: str, plan_text: str, results: list[str]) -> Sample | None:
         body = ORCHESTRATOR_SYNTHESIZE_TEMPLATE.format(
             problem_statement=problem_statement,
             plan=_strip_chat_tokens(plan_text),
@@ -195,7 +193,9 @@ async def _subagent_worker(
             sample.metadata["approach_index"] = approach_index
         return sample
     except Exception:
-        logger.warning("subagent worker chain=%s approach=%s failed:\n%s", chain_id, approach_index, traceback.format_exc())
+        logger.warning(
+            "subagent worker chain=%s approach=%s failed:\n%s", chain_id, approach_index, traceback.format_exc()
+        )
         return None
 
 
@@ -247,8 +247,12 @@ def _append_placeholder(args, role: str, donor: Sample, metadata_overrides: dict
     placeholder.reward = 0.0
     metadata = dict(placeholder.metadata or {})
     for key in (
-        "chain_id", "round_number", "approach_index",
-        "plan_parse_failed", "plan_missing_tags", "plan_duplicate_tags",
+        "chain_id",
+        "round_number",
+        "approach_index",
+        "plan_parse_failed",
+        "plan_missing_tags",
+        "plan_duplicate_tags",
     ):
         metadata.pop(key, None)
     placeholder.metadata = {
@@ -372,9 +376,7 @@ async def run_agent_system(args, sample: Sample) -> list[Sample]:
             continue
         dispatches = parse_results[chain_id].dispatches
         for approach_index, dispatch in enumerate(dispatches):
-            subagent_tasks.append(
-                _subagent_worker(args, raw_problem, dispatch, chain_id, approach_index)
-            )
+            subagent_tasks.append(_subagent_worker(args, raw_problem, dispatch, chain_id, approach_index))
             subagent_keys.append((chain_id, approach_index))
 
     subagent_results = await asyncio.gather(*subagent_tasks, return_exceptions=False)
@@ -410,9 +412,7 @@ async def run_agent_system(args, sample: Sample) -> list[Sample]:
         sub_responses = []
         for sub in subs:
             sub_responses.append(_visible_response(sub) if sub is not None else "[no response]")
-        synth_tasks.append(
-            _synthesize_worker(args, raw_problem, plan_sample, sub_responses, chain_id)
-        )
+        synth_tasks.append(_synthesize_worker(args, raw_problem, plan_sample, sub_responses, chain_id))
         synth_chain_ids.append(chain_id)
 
     synth_results = await asyncio.gather(*synth_tasks, return_exceptions=False)

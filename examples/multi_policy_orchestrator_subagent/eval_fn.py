@@ -129,7 +129,9 @@ def _eval_one_dataset(args: Namespace, dataset_cfg) -> dict[str, dict[str, list[
             best_subagent_rewards_per_prompt.append(best_per_chain)
 
         # synthesis_lift: RM(final) - max(RM(subagents)) per chain
-        by_chain_r2 = {_chain_id(s): _raw_reward(s) for s in round2 if not _is_placeholder(s) and _chain_id(s) is not None}
+        by_chain_r2 = {
+            _chain_id(s): _raw_reward(s) for s in round2 if not _is_placeholder(s) and _chain_id(s) is not None
+        }
         for cid, final_r in by_chain_r2.items():
             sub_rs = by_chain_sub.get(cid, [])
             if sub_rs:
@@ -158,14 +160,14 @@ def _eval_one_dataset(args: Namespace, dataset_cfg) -> dict[str, dict[str, list[
 
         round1_truncated.extend([float(s.status == Sample.Status.TRUNCATED) for s in round1 if not _is_placeholder(s)])
         round2_truncated.extend([float(s.status == Sample.Status.TRUNCATED) for s in round2 if not _is_placeholder(s)])
-        subagent_truncated.extend([float(s.status == Sample.Status.TRUNCATED) for s in subagent if not _is_placeholder(s)])
+        subagent_truncated.extend(
+            [float(s.status == Sample.Status.TRUNCATED) for s in subagent if not _is_placeholder(s)]
+        )
 
     base = dataset_cfg.name
     out: dict[str, dict[str, list[Any]]] = {}
     for k in _PASSK_KS:
-        out[f"{base}_final_pass{k}"] = _ds(
-            _pass_at_k_per_prompt(final_rewards_per_prompt, k), round2_samples_flat
-        )
+        out[f"{base}_final_pass{k}"] = _ds(_pass_at_k_per_prompt(final_rewards_per_prompt, k), round2_samples_flat)
         out[f"{base}_subagent_pass{k}"] = _ds(
             _pass_at_k_per_prompt(subagent_rewards_per_prompt, k), subagent_samples_flat
         )
