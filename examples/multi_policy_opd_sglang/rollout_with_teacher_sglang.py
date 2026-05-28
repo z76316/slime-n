@@ -1,31 +1,8 @@
 """Custom rollout for multi-policy OPD with an SGLang-backend teacher.
 
-Pipeline:
-    1. Generate the student's response via the student's SGLang engine
-       (delegated to slime's stock rollout).
-    2. POST the full token sequence to teacher_sglang's /generate endpoint
-       with ``return_logprob=True`` and ``max_new_tokens=0`` — prefix-only
-       scoring, no new generation. The teacher returns per-token logprobs
-       for the entire prompt+response prefix.
-    3. Slice to response-only tokens, store as a float32 tensor on
-       ``sample.teacher_log_probs``. Downstream
-       ``_convert_samples_to_train_data`` (slime/ray/rollout.py:995-996)
-       hoists per-sample teacher_log_probs into
-       ``train_data["teacher_log_probs"]``, which the student's train_actor
-       reads via rollout_data so ``apply_opd_kl_to_advantages`` applies it
-       as a reverse-KL term.
-
-The POST shape mirrors ``slime.rollout.on_policy_distillation.reward_func``
-verbatim, which is the proven single-policy SGLang-OPD path. The only
-difference: instead of reading a hardcoded ``args.rm_url``, the teacher's
-URL is resolved through the framework's per-model router map via
-``get_model_url(args, "teacher_sglang")``, which RolloutManager populates
-on ``args.sglang_model_routers`` at startup (slime/ray/rollout.py:1381).
-
-Sample.policy_name is not stamped here: teacher_sglang is not registered
-with RolloutManager (only trainable policies are, via create_training_models_multi),
-so _policy_to_server contains only "student". The framework's auto-tag
-fallback at slime/ray/rollout.py:657 then tags every sample with "student".
+Student generates → POST to teacher_sglang for prefix-only logprob scoring → dual-write to:
+  - sample.teacher_log_probs        (OPD signal; overwritten by teacher_megatron when present)
+  - sample.teacher_sglang_log_probs (diagnostic copy; never overwritten)
 """
 
 from __future__ import annotations
@@ -64,5 +41,7 @@ async def generate_with_teacher_sglang(args, sample: Sample, sampling_params, ev
         [item[0] for item in resp["meta_info"]["input_token_logprobs"][1:]],
         dtype=torch.float32,
     )
-    sample.teacher_log_probs = all_logprobs[-sample.response_length :]
+    response_logprobs = all_logprobs[-sample.response_length :]
+    sample.teacher_log_probs = response_logprobs  # OPD signal; overwritten by teacher_megatron when present
+    sample.teacher_sglang_log_probs = response_logprobs  # diagnostic copy; never overwritten
     return sample

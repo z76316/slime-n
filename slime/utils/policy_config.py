@@ -1079,17 +1079,52 @@ def config_to_namespace(cfg: PolicyConfig, base_args):
     # have reached through legacy CLI flags.
     import os
 
+    # When the per-policy load path *is* a valid Megatron resume checkpoint
+    # AND latest_checkpointed_iteration.txt points to a numbered iter dir
+    # (not a "release"-only weights-only ckpt), clear the four "fresh init"
+    # flags that the GLOBAL slime_validate_args set on base_args at
+    # parse_args time. In multi-policy mode, global --load is always None
+    # (each policy carries its own load in YAML), so global validation
+    # always hits the "no resume → finetune=True, no_load_optim=True,
+    # no_load_rng=True, start_rollout_id=0" branch. Those flags get carried
+    # into the per-policy ns via Namespace(**vars(base_args)); without this
+    # reset, a valid resume still finetunes from scratch. "release"-only
+    # ckpts (typical for HF→torch_dist exports) keep finetune=True because
+    # there's no optim/rng to load.
+    def _load_is_numbered_iter(load_dir):
+        """True iff load_dir contains a Megatron numbered-iter checkpoint."""
+        marker = os.path.join(load_dir, "latest_checkpointed_iteration.txt")
+        try:
+            with open(marker) as f:
+                value = f.read().strip()
+        except OSError:
+            return False
+        return value.isdigit()
+
+    def _resume_reset(ns):
+        ns.no_load_optim = False
+        ns.no_load_rng = False
+        ns.finetune = False
+        ns.start_rollout_id = None  # let initialize_model_and_optimizer load it from the checkpoint
+
     if ns.megatron_to_hf_mode == "bridge":
         if (
             ns.load is not None
             and os.path.exists(ns.load)
             and os.path.exists(os.path.join(ns.load, "latest_checkpointed_iteration.txt"))
+            and _load_is_numbered_iter(ns.load)
         ):
-            # Megatron torch_dist ckpt at ns.load → resume from it; mbridge
-            # only used in model_provider for the architecture spec.
-            pass
+            # Megatron torch_dist numbered-iter ckpt at ns.load → resume from
+            # it; mbridge only used in model_provider for the architecture
+            # spec. Reset the inherited fresh-init flags so the actor
+            # actually resumes optim/rng/iteration state.
+            _resume_reset(ns)
         else:
-            if ns.load is None:
+            # Symmetric with the raw-mode else below: if `load` is set but
+            # the directory doesn't exist (typical of first-run "save dir
+            # doesn't exist yet"), fall back to ref_load → hf_checkpoint
+            # so mbridge can load HF weights.
+            if ns.load is None or not os.path.exists(ns.load):
                 ns.load = ns.ref_load or cfg.hf_checkpoint
             # HF/bridge load → start at rollout 0
             ns.start_rollout_id = 0
@@ -1106,6 +1141,13 @@ def config_to_namespace(cfg: PolicyConfig, base_args):
             if getattr(ns, "ref_ckpt_step", None) is not None:
                 ns.ckpt_step = ns.ref_ckpt_step
             ns.start_rollout_id = 0
+        elif _load_is_numbered_iter(ns.load):
+            # Per-policy load is a valid Megatron torch_dist resume
+            # checkpoint (numbered iter dir) — clear the inherited fresh-init
+            # flags so the actor actually resumes optim/rng/iteration state.
+            _resume_reset(ns)
+        # else: "release"-only weights load — keep inherited finetune flags
+        # (no optim/rng to load).
 
     # Re-derive Megatron defaults whose inputs the policy may have
     # overridden (e.g. padded_vocab_size when vocab_size changed). Runs
