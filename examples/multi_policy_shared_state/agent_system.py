@@ -260,19 +260,34 @@ def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None 
 
 def _fixup_logprobs(args, role: str):
     samples = args.results_dict[role]
-    has_real_logprobs = any(
-        not getattr(s, "remove_sample", False)
-        and getattr(s, "rollout_log_probs", None) is not None
-        and len(s.rollout_log_probs) > 0
-        for s in samples
-    )
+    if not any(getattr(s, "rollout_log_probs", None) is not None for s in samples):
+        return
+
+    fixed = 0
+    fixed_indices = []
     for s in samples:
-        if not (s.metadata or {}).get("is_padding_placeholder"):
+        response_length = getattr(s, "response_length", 0) or 0
+        rollout_log_probs = getattr(s, "rollout_log_probs", None)
+        if rollout_log_probs is not None and len(rollout_log_probs) == response_length:
             continue
-        if has_real_logprobs:
-            s.rollout_log_probs = []
-        else:
-            s.rollout_log_probs = None
+
+        fixed += 1
+        fixed_indices.append(getattr(s, "index", None))
+        s.remove_sample = True
+        s.reward = 0.0
+        s.loss_mask = [0] * response_length
+        s.rollout_log_probs = [0.0] * response_length
+        s.metadata = dict(s.metadata or {})
+        s.metadata["raw_reward"] = 0.0
+        s.metadata["missing_rollout_log_probs"] = True
+
+    if fixed:
+        logger.warning(
+            "role=%s fixed %s samples with missing/mismatched rollout_log_probs; indices=%s",
+            role,
+            fixed,
+            fixed_indices[:8],
+        )
 
 
 async def run_agent_system(args, sample: Sample) -> list[Sample]:
