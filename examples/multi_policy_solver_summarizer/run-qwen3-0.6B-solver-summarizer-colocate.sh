@@ -22,7 +22,7 @@
 #   layout where each side gets a dedicated GPU. Under --colocate the
 #   sglang engine and Megatron trainer share the same GPU memory budget,
 #   so you'll need to lower at least one of:
-#     - sglang.mem_fraction_static  → 0.2-0.3 (matches multi_policy_multi_agent)
+#     - sglang.mem_fraction_static  → 0.2-0.3 (matches multi_policy_solver_rewriter_selector)
 #     - megatron.max_tokens_per_gpu → 2048
 #     - megatron.mem_fraction_static handled by torch_memory_saver
 #   Otherwise expect colocate-mode OOM during the train forward pass.

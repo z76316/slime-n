@@ -1,4 +1,4 @@
-# Multi-Policy Multi-Agent (solver + rewriter + selector)
+# Multi-Policy Solver-Rewriter-Selector
 
 Three trainable paired policies cooperate on math problems (DAPO-math-17k). The **solver** generates N candidate solutions; the **rewriter** sees all N solver candidates and synthesizes a refined solution per worker; the **selector** then sees the N rewriter candidates and emits `Judgment: IDX` picking one as best. The selector inherits the rewriter's correctness reward on the picked candidate.
 
@@ -9,7 +9,7 @@ Three trainable paired policies cooperate on math problems (DAPO-math-17k). The 
 ## Files
 
 * `config.yaml`: solver + rewriter + selector policy schema (all three trainable).
-* `run-qwen3-0.6B-multi-policy-multi-agent.sh`: launch script (ray start + train_multi_policy.py, `--colocate` to fit on a 3-4 GPU box).
+* `run-qwen3-0.6B-solver-rewriter-selector.sh`: launch script (ray start + train_multi_policy.py, `--colocate` to fit on a 3-4 GPU box).
 * `agent_system.py`: per-prompt rollout orchestration (solver → rewriter → selector dispatch).
 * `rollout_with_multi_agents.py`: top-level multi-agent rollout entrypoint.
 * `prompts.py`: solver / rewriter / selector prompt templates.
@@ -18,7 +18,7 @@ Three trainable paired policies cooperate on math problems (DAPO-math-17k). The 
 
 ```bash
 cd slime
-bash examples/multi_policy_multi_agent/run-qwen3-0.6B-multi-policy-multi-agent.sh
+bash examples/multi_policy_solver_rewriter_selector/run-qwen3-0.6B-solver-rewriter-selector.sh
 ```
 
 ## How It Works

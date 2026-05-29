@@ -34,7 +34,7 @@ Once **policy** is the unit of ownership — weights, optimizer, buffer, checkpo
 | **Asymmetric PPO** (actor + critic) | **Solver + Summarizer** |
 | ![Multi-Agent Debate](./examples/multi_policy_multiagent_debate/imgs/arch.png) | ![Cooperative Swarm](./examples/multi_policy_exam_swarm_rl/imgs/arch.png) |
 | **Multi-Agent Debate** | **Cooperative Swarm** |
-| ![Multi-Agent (solver + rewriter + selector)](./examples/multi_policy_multi_agent/imgs/arch.png) | |
+| ![Solver-Rewriter-Selector](./examples/multi_policy_solver_rewriter_selector/imgs/arch.png) | |
 | **Multi-Agent** (solver + rewriter + selector) | |
 
 *Each use case above composed from the three primitives.*

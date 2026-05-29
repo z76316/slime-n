@@ -2,7 +2,6 @@ import asyncio
 import itertools
 import logging
 import re
-import time
 import traceback
 from copy import deepcopy
 
@@ -68,14 +67,14 @@ async def generate_response(args, prompt, key):
 
         output = await post(url, payload)
 
-        # Extract new response tokens
-        if "output_token_logprobs" in output["meta_info"]:
-            new_response_tokens = [item[1] for item in output["meta_info"]["output_token_logprobs"]]
-            new_response_log_probs = [item[0] for item in output["meta_info"]["output_token_logprobs"]]
-        else:
-            # abort
-            new_response_tokens = []
-            new_response_log_probs = []
+        if "output_token_logprobs" not in output["meta_info"]:
+            logger.warning("Missing output_token_logprobs for role=%s", key)
+            return None
+
+        new_response_tokens = [item[1] for item in output["meta_info"]["output_token_logprobs"]]
+        new_response_log_probs = [item[0] for item in output["meta_info"]["output_token_logprobs"]]
+        if not new_response_tokens:
+            return None
 
         # Update sample with tokens directly - avoiding re-tokenization
         sample.tokens = sample.tokens + new_response_tokens
@@ -105,16 +104,16 @@ async def generate_response(args, prompt, key):
 
         final = output["text"].replace("<|user|>", "")
         if "</think>" in final:
-            contents = final.split("</think>")
-            if len(contents) == 2 and contents[1] != "":
+            contents = final.split("</think>", 1)
+            if len(contents) == 2 and contents[1].strip():
                 reason_content = contents[0].strip()
                 response_content = contents[1].strip()
                 sample.reason_content = reason_content
                 sample.response_content = response_content
                 return response_content
         sample.reason_content = None
-        sample.response_content = None
-        return None
+        sample.response_content = _strip_chat_tokens(final).strip()
+        return sample.response_content if sample.response_content else None
     except Exception as e:
         print(f"Error generating response: {e}")
         return None
@@ -128,13 +127,15 @@ class Agent:
 
     async def run(self, args, prompt, max_retries: int = 1, key: str = None) -> str:
         """Runs the agent by sending a prompt to the LLM."""
-        for _i in range(max_retries):
+        for attempt in range(max_retries):
             try:
                 response = await generate_response(args, prompt, key=key)
-                return response
+                if response is not None:
+                    return response
             except Exception as e:
                 print(f"Error querying LLM: {e}")
-                time.sleep(1)
+            if attempt + 1 < max_retries:
+                await asyncio.sleep(1)
         print(f"Failed to query LLM after {max_retries} retries")
         return None
 
@@ -295,6 +296,8 @@ def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None 
             return tokenizer(prompt, add_special_tokens=False)["input_ids"]
         return []
 
+    role_has_logprobs = any(sample.rollout_log_probs is not None for sample in samples)
+
     while len(samples) < target_count:
         donor = donor_pool[0]
         prompt_tokens = _prompt_tokens(donor)
@@ -316,9 +319,9 @@ def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None 
         placeholder.response_content = None
         placeholder.reason_content = None
         placeholder.tokens = prompt_tokens
-        # Keep the per-sample field present: train_data collection checks only
-        # the first sample. For a zero-length response, [] is the aligned value.
-        placeholder.rollout_log_probs = []
+        # train_data collection checks the first sample only. Keep placeholder
+        # logprobs present only when this final role buffer has real logprobs.
+        placeholder.rollout_log_probs = [] if role_has_logprobs else None
         placeholder.rollout_routed_experts = None
         placeholder.teacher_log_probs = None
         samples.append(placeholder)
