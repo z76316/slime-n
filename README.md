@@ -24,32 +24,99 @@ With this unified schema, the same framework can support on-policy distillation,
 
 ## Use Cases
 
-Once **policy** is the unit of ownership — weights, optimizer, buffer, checkpoint — a wide class of multi-role RL systems becomes natural to express. The schema already covers:
+Once **policy** is the unit of ownership — weights, optimizer, buffer, checkpoint — a wide class of multi-role RL systems becomes natural to express. The schema already covers three families, all composed from the same three primitives.
+
+For each multi-agent use case below, the left figure is the **conceptual schema** (the data flow between roles) and the right figure is the **slime<sup>n</sup> framework** view (the Megatron / SGLang policy layout at runtime). PPO and OPD show the framework view only.
+
+### 1. Asymmetric PPO
+
+Actor and critic are separate policies, each with its own architecture, optimizer, and buffer — the critic a standalone Megatron value head with no SGLang engine. Code: [`examples/multi_policy_ppo`](examples/multi_policy_ppo).
+
+| |
+|:---:|
+| ![Asymmetric PPO](./examples/multi_policy_ppo/imgs/arch.png) |
+| **Asymmetric PPO** (actor + critic) |
+
+### 2. On-policy Distillation
+
+A trainable student paired with a frozen teacher that returns per-token logprobs for a reverse-KL term. The teacher runs on either backend. Code: [`examples/multi_policy_opd_megatron`](examples/multi_policy_opd_megatron) · [`examples/multi_policy_opd_sglang`](examples/multi_policy_opd_sglang).
 
 | | |
 |:---:|:---:|
-| ![OPD — Megatron teacher](./examples/multi_policy_opd_megatron/imgs/arch.png) | ![OPD — SGLang teacher](./examples/multi_policy_opd_sglang/imgs/arch.png) |
-| **OPD — Megatron teacher** | **OPD — SGLang teacher** |
-| ![Asymmetric PPO](./examples/multi_policy_ppo/imgs/arch.png) | ![Solver + Summarizer](./examples/multi_policy_solver_summarizer/imgs/arch.png) |
-| **Asymmetric PPO** (actor + critic) | **Solver + Summarizer** |
-| ![Multi-Agent Debate](./examples/multi_policy_multiagent_debate/imgs/arch.png) | ![Cooperative Swarm](./examples/multi_policy_exam_swarm_rl/imgs/arch.png) |
-| **Multi-Agent Debate** | **Cooperative Swarm** |
-| ![Solver-Rewriter-Selector](./examples/multi_policy_solver_rewriter_selector/imgs/arch.png) | |
-| **Multi-Agent** (solver + rewriter + selector) | |
+| ![On-policy Distillation — Megatron teacher](./examples/multi_policy_opd_megatron/imgs/arch.png) | ![On-policy Distillation — SGLang teacher](./examples/multi_policy_opd_sglang/imgs/arch.png) |
+| **On-policy Distillation — Megatron teacher** | **On-policy Distillation — SGLang teacher** |
 
-*Each use case above composed from the three primitives.*
+### 3. Multi-Agent Systems (Multiple policies)
 
-Natural extensions of the same primitives — actor + judge, actor + verifier + repair policy, red-team / blue-team, teacher cascades, ensemble critics, self-play, curriculum generators, specialist routing — fall out of the policy abstraction without new framework code.
+Multiple trainable policies cooperating in a single run — debate, candidate generation + synthesis, cooperative swarms, generator/verifier loops, orchestrator + subagents, shared-state rounds, and staged solver pipelines.
+
+**3.1 Multi-Agent Debate**
+
+N generator agents propose independent answers, then in later rounds each critic agent revises its own answer against a summary of the other agents' responses, with the majority-vote answer as the only training signal. Code: [`examples/multi_policy_multiagent_debate`](examples/multi_policy_multiagent_debate).
+
+| schema | slime<sup>n</sup> |
+|:---:|:---:|
+| ![Debate schema](./examples/multi_policy_multiagent_debate/imgs/schema.png) | ![Debate framework](./examples/multi_policy_multiagent_debate/imgs/arch.png) |
+
+**3.2 Solver + Summarizer**
+
+The solver generates N candidate solutions per prompt and the summarizer synthesizes them into a single final answer, with both policies trained jointly on their own correctness rewards plus group reward shaping. Code: [`examples/multi_policy_solver_summarizer`](examples/multi_policy_solver_summarizer).
+
+| schema | slime<sup>n</sup> |
+|:---:|:---:|
+| ![Solver+Summarizer schema](./examples/multi_policy_solver_summarizer/imgs/schema.png) | ![Solver+Summarizer framework](./examples/multi_policy_solver_summarizer/imgs/arch.png) |
+
+**3.3 Generator + Verifier**
+
+The generator answers, the verifier critiques, and the generator revises with its round-1 answer carried forward — two trainable policies looping answer → critique → revise. Code: [`examples/multi_policy_generator_verifier`](examples/multi_policy_generator_verifier).
+
+| schema | slime<sup>n</sup> |
+|:---:|:---:|
+| ![Generator+Verifier schema](./examples/multi_policy_generator_verifier/imgs/schema.png) | ![Generator+Verifier framework](./examples/multi_policy_generator_verifier/imgs/arch.png) |
+
+**3.4 Orchestrator + Subagents**
+
+An orchestrator plans and dispatches the prompt to several subagents pursuing different approaches, then synthesizes their returned results into a final answer. Code: [`examples/multi_policy_orchestrator_subagent`](examples/multi_policy_orchestrator_subagent).
+
+| schema | slime<sup>n</sup> |
+|:---:|:---:|
+| ![Orchestrator+Subagent schema](./examples/multi_policy_orchestrator_subagent/imgs/schema.png) | ![Orchestrator+Subagent framework](./examples/multi_policy_orchestrator_subagent/imgs/arch.png) |
+
+**3.5 Cooperative Swarm**
+
+Eight independent agents answer the same prompt in parallel, blending a per-agent reward from self-GRPO, swarm EMA pass-rate, and peer ranking into a single advantage. Code: [`examples/multi_policy_exam_swarm`](examples/multi_policy_exam_swarm).
+
+| schema | slime<sup>n</sup> |
+|:---:|:---:|
+| ![Swarm schema](./examples/multi_policy_exam_swarm/imgs/schema.png) | ![Swarm framework](./examples/multi_policy_exam_swarm/imgs/arch.png) |
+
+**3.6 Shared-State Peers**
+
+Two peers alternately read from and write to a versioned shared state across rounds, each round's updated state feeding both peers in the next. Code: [`examples/multi_policy_shared_state`](examples/multi_policy_shared_state).
+
+| schema | slime<sup>n</sup> |
+|:---:|:---:|
+| ![Shared-State schema](./examples/multi_policy_shared_state/imgs/schema.png) | ![Shared-State framework](./examples/multi_policy_shared_state/imgs/arch.png) |
+
+**3.7 Solver-Rewriter-Selector**
+
+The solver emits N candidates, the rewriter refines them after seeing all N, and the selector picks the single best answer out of the N. Code: [`examples/multi_policy_solver_rewriter_selector`](examples/multi_policy_solver_rewriter_selector).
+
+| schema | slime<sup>n</sup> |
+|:---:|:---:|
+| ![Solver-Rewriter-Selector schema](./examples/multi_policy_solver_rewriter_selector/imgs/schema.png) | ![Solver-Rewriter-Selector framework](./examples/multi_policy_solver_rewriter_selector/imgs/arch.png) |
 
 
-## Features
+
+
+## Implementation Details
 
 - **`train_multi_policy.py`** — driver for n≥1 trainable policies. Replaces `train.py` for multi-policy runs.
 - **YAML-driven configs** — `--config <path>.yaml`. Per-policy fields (parallelism, batching, optimizer, loss, paths, Megatron numerical / dropout, `log_probs_chunk_size`) live in the YAML; cluster sizing is derived from policies. See [`slime/utils/policy_config.py`](slime/utils/policy_config.py).
 - **Per-policy buffers (split mode)** — each policy trains on its own samples, tagged via `Sample.policy_name`.
 - **Per-policy weight sync** — serialized push from each Megatron actor to its paired sglang engine.
 
-## Multi-Policy YAML Schema
+## Multi-Policy YAML Config
 
 Multi-policy runs are defined by a single YAML file passed with `--config`. The top-level `policies` list is the source of truth for the run composition: each entry declares one policy's identity, trainability, checkpoints, buffer routing, GPU slice, Megatron training settings, and optional SGLang engine settings. Policy names must be unique, and each paired policy gets a 1:1 SGLang server with the same name.
 
@@ -106,50 +173,18 @@ The `megatron:` block is flattened into the per-policy Megatron argument namespa
 
 Cluster sizing is derived from the YAML. Without `--colocate`, total GPUs are `sum(megatron_num_nodes * num_gpus_per_node) + sum(sglang_num_nodes * num_gpus_per_node)` across active policies. With `--colocate`, slime uses the larger of the Megatron and SGLang sides. A frozen standalone Megatron teacher sets `trainable: false` and `sglang_num_nodes: 0`.
 
-## Examples
+## Experimental Results
 
-Three workloads exercise the multi-policy schema — two paired-pipeline cooperations (debate, solver+summarizer) and a frozen standalone Megatron actor (OPD teacher). Standalone SGLang engines (judge / reward model variants) are supported by the same schema; example pending.
+Two multi-agent cooperations trained on DAPO-math-17k. In both, every policy carries its own optimizer and split buffer, and rewards rise jointly.
 
-### 1. Multi-Policy Multi-Agent debate — generator + critic
-
-Two trainable paired policies implement a paper-aligned debate workflow. In round 0, N `generator` agents propose independent answers. In later rounds, an untracked summarize subroutine summarizes the other agents' previous responses, and each `critic` agent updates its own answer from that summary plus its own prior response.
-
-Rewards are computed from the final critic responses: the system majority-votes a final answer `ŷ`; round-0 generator samples are rewarded for matching `ŷ`, and each critic trajectory receives reward 1 when that agent's final critic answer matches `ŷ`. The dataset gold label is intentionally ignored in this example.
-
-Both `generator` and `critic` are trainable paired policies (Megatron + SGLang). The summarize step is routed through the generator SGLang engine, but its samples are not added to a training buffer. Code: [`examples/multi_policy_multiagent_debate`](examples/multi_policy_multiagent_debate).
+**Multi-Agent Debate** — generator + critic, with the ŷ majority vote over critic outputs as the only signal (gold label ignored). Code: [`examples/multi_policy_multiagent_debate`](examples/multi_policy_multiagent_debate).
 
 ![multi-agent debate training reward](./examples/multi_policy_multiagent_debate/imgs/reward.png)
 
-*Paper-aligned debate on DAPO-math-17k, ground-truth label intentionally ignored. The ŷ majority vote over critic outputs is the only training signal; both generator and critic rewards rise round by round.*
-
-### 2. Multi-Policy Solver + Summarizer — candidate generation + final answer synthesis
-
-Two trainable paired policies cooperate on math problems. The `solver` policy generates N candidate solutions in parallel. The `summarizer` policy then sees all N solver candidates and synthesizes a final answer in the standard `Answer: \boxed{...}` format.
-
-Both policies train on split buffers and receive direct RLVR correctness rewards on their own completions. The example also applies group reward shaping from the summarizer phase: if the mean summarizer reward is high, both roles are upweighted; otherwise both roles are downweighted.
-
-Both `solver` and `summarizer` are trainable paired policies (Megatron + SGLang). Code: [`examples/multi_policy_solver_summarizer`](examples/multi_policy_solver_summarizer).
+**Solver + Summarizer** — solver emits N candidates, summarizer synthesizes a final `\boxed{...}` answer; both get RLVR correctness rewards plus summarizer-phase group shaping. Code: [`examples/multi_policy_solver_summarizer`](examples/multi_policy_solver_summarizer).
 
 ![solver + summarizer training reward](./examples/multi_policy_solver_summarizer/imgs/reward.png)
 
-*Solver and summarizer trained together in a single run on DAPO-math-17k — each policy carries its own optimizer and buffer; both rewards rise jointly.*
-
-### 3. OPD — on-policy distillation (student + frozen teacher)
-
-Trainable **student** generates rollouts; frozen **teacher** runs forward-only on those rollouts and returns per-token logprobs that feed a reverse-KL term into the student's loss. The `student` is a standard trainable paired policy (Megatron + SGLang). The schema admits two teacher backends, both frozen:
-
-- **Megatron teacher** — standalone Megatron actor, no SGLang engine. Recommended; its forward kernels match the student's training-time forward, keeping the KL noise floor low.
-- **SGLang teacher** — standalone SGLang engine, no Megatron actor. Cheaper deployment and supports a larger teacher, at the cost of a small kernel mismatch on the KL term.
-
-The teacher's `train()` returns `{"teacher_log_probs": ...}`. The driver merges all frozen-policy outputs into the student's `external_data`, which `train_actor` writes into `rollout_data` so `apply_opd_kl_to_advantages` can consume it.
-
-Code: [`examples/multi_policy_opd_megatron`](examples/multi_policy_opd_megatron) (Megatron-backend teacher). The SGLang-backend variant uses the same schema; example pending.
-
-### 4. PPO — asymmetric actor + critic
-
-Trainable **actor** (Qwen3-1.7B) generates rollouts; trainable **critic** (Qwen3-0.6B) runs `train_critic` on those rollouts and emits per-token `values` that feed PPO advantages into the actor's loss. The critic is a standalone trainable Megatron actor (`m✓ s✗`) — no SGLang engine, just a value head. Per-policy `megatron_model_args` lets actor and critic differ in architecture, which legacy single-policy PPO cannot do (`train.py + --critic-config-path` ties them to the same CLI-global `MODEL_ARGS`).
-
-Code: [`examples/multi_policy_ppo`](examples/multi_policy_ppo).
 
 ## Run
 
