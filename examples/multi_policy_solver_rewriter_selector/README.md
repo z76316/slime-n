@@ -2,9 +2,11 @@
 
 Three trainable paired policies cooperate on math problems (DAPO-math-17k). The **solver** generates N candidate solutions; the **rewriter** sees all N solver candidates and synthesizes a refined solution per worker; the **selector** then sees the N rewriter candidates and emits `Judgment: IDX` picking one as best. The selector inherits the rewriter's correctness reward on the picked candidate.
 
-![architecture: three trainable pairs (solver, rewriter, selector)](./imgs/arch.png)
+| schema | slime<sup>n</sup> |
+|:---:|:---:|
+| ![solver-rewriter-selector schema](./imgs/schema.png) | ![solver-rewriter-selector framework](./imgs/arch.png) |
 
-*Three trainable pairs in a chain: solver → rewriter → selector. The solver emits N candidates, the rewriter rewrites each, the selector picks one with `Judgment: IDX`. Each role trains on its own buffer with its own optimizer.*
+*Left: the solver emits N candidates, the rewriter refines each after seeing all N, the selector picks one with `Judgment: IDX`. Right: three trainable pairs in a chain (solver → rewriter → selector), each Megatron + SGLang with its own buffer and optimizer.*
 
 ## Files
 
@@ -17,7 +19,7 @@ Three trainable paired policies cooperate on math problems (DAPO-math-17k). The 
 ## Quick Start
 
 ```bash
-cd slime
+cd slime-n
 bash examples/multi_policy_solver_rewriter_selector/run-qwen3-0.6B-solver-rewriter-selector.sh
 ```
 

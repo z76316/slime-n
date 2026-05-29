@@ -2,9 +2,11 @@
 
 Two trainable paired policies cooperate on math problems (DAPO-math-17k). The **solver** generates N candidate solutions in parallel; the **summarizer** then sees ALL N candidates and synthesizes one final answer in the standard `Answer: \boxed{...}` format. Both policies receive direct correctness rewards on their own completions.
 
-![architecture: two trainable pairs (solver, summarizer)](./imgs/arch.png)
+| schema | slime<sup>n</sup> |
+|:---:|:---:|
+| ![solver+summarizer schema](./imgs/schema.png) | ![solver+summarizer framework](./imgs/arch.png) |
 
-*Two trainable pairs. The chain is owned by the custom rollout function: solver SGLang produces N candidates → those candidates become the summarizer's prompt → summarizer SGLang emits the final boxed answer. Each policy has its own optimizer, buffer, and RLVR reward.*
+*Left: the solver produces N candidates, the summarizer sees all N and emits one final `\boxed{...}` answer. Right: two trainable pairs (Megatron + SGLang); the chain is owned by the custom rollout function, and each policy has its own optimizer, buffer, and RLVR reward.*
 
 ## Files
 
@@ -19,7 +21,7 @@ Two trainable paired policies cooperate on math problems (DAPO-math-17k). The **
 ## Quick Start
 
 ```bash
-cd slime
+cd slime-n
 bash examples/multi_policy_solver_summarizer/run-qwen3-0.6B-solver-summarizer.sh
 ```
 

@@ -6,6 +6,12 @@ Per prompt, the generator produces 8 first-round answers. The verifier critiques
 each answer independently. The generator then produces 8 second-round answers,
 one per critique.
 
+| schema | slime<sup>n</sup> |
+|:---:|:---:|
+| ![generator+verifier schema](./imgs/schema.png) | ![generator+verifier framework](./imgs/arch.png) |
+
+*Left: answer → critique → revise, with the round-1 answer carried into round 2. Right: two trainable pairs (generator, verifier), each Megatron + SGLang with its own buffer.*
+
 ## Reward
 
 - `generator` round 1: rule-based RM on `answer_1`

@@ -14,7 +14,7 @@ Multi-policy on-policy distillation: a trainable **student** generates rollouts;
 ## Quick Start
 
 ```bash
-cd slime
+cd slime-n
 bash examples/multi_policy_opd_megatron/run-qwen3-0.6B-opd-megatron.sh
 ```
 

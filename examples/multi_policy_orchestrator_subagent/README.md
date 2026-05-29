@@ -1,25 +1,15 @@
 # Multi-Policy Orchestrator + Subagent
 
-This example trains two paired policies on a fan-out/fan-in math chain.
+This example trains two paired policies on a fan-out/fan-in math chain. The
+orchestrator decomposes a problem into 3 approaches (round 1), dispatches each to
+a shared-weight subagent policy, then synthesizes all 3 results into a final
+answer (round 2).
 
-```
-prompt --> orchestrator round-1 --> plan (3 dispatch prompts)
-                                        |
-                         +--------------+--------------+
-                         v              v              v
-                    subagent(d1)   subagent(d2)   subagent(d3)
-                         |              |              |
-                         +--------------+--------------+
-                                        v
-           orchestrator round-2 <-- all 3 subagent outputs
-                    |
-                    v
-              final answer
-```
+| schema | slime<sup>n</sup> |
+|:---:|:---:|
+| ![orchestrator+subagent schema](./imgs/schema.png) | ![orchestrator+subagent framework](./imgs/arch.png) |
 
-The orchestrator decomposes a problem into 3 approaches (round 1), dispatches
-each to a shared-weight subagent policy, then synthesizes all 3 results into a
-final answer (round 2).
+*Left: orchestrator plans 3 approaches, dispatches each to a subagent, then synthesizes the 3 results into a final answer. Right: two trainable pairs (orchestrator, subagent), each Megatron + SGLang with its own buffer.*
 
 ## Reward
 

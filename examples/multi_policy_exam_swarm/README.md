@@ -2,9 +2,11 @@
 
 Train 8 homogeneous agents that independently solve the same math problems. Each agent's reward blends three signals: self-improvement (GRPO within its own K), swarm cooperation (EMA-baselined pass rate), and per-peer competition (rank vs other agents).
 
-![architecture: 8 homogeneous trainable pairs](./imgs/arch.png)
+| schema | slime<sup>n</sup> |
+|:---:|:---:|
+| ![swarm schema](./imgs/schema.png) | ![swarm framework](./imgs/arch.png) |
 
-*8 byte-identical trainable pairs sharing one rollout manager. Each agent has its own Megatron + SGLang and its own training buffer; rewards combine intra-agent (`self`), swarm-wide (`swarm`), and pairwise (`peer`) signals.*
+*Left: 8 agents independently answer the same prompt; rewards combine intra-agent (`self`), swarm-wide (`swarm`), and pairwise (`peer`) signals. Right: 8 byte-identical trainable pairs sharing one rollout manager, each with its own Megatron + SGLang and training buffer.*
 
 ## Files
 
@@ -16,8 +18,8 @@ Train 8 homogeneous agents that independently solve the same math problems. Each
 ## Quick Start
 
 ```bash
-cd slime
-bash examples/multi_policy_exam_swarm_rl/run-qwen3-0.6B-exam-swarm-colocate.sh
+cd slime-n
+bash examples/multi_policy_exam_swarm/run-qwen3-0.6B-exam-swarm-colocate.sh
 ```
 
 8 GPUs, single node. Each GPU hosts one agent's Megatron + sglang (offload-swap between phases).

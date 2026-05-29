@@ -2,23 +2,11 @@
 
 This example trains two symmetric peer policies on a shared-state math chain.
 
-```
-prompt --+---> peer_a round-1 ---> solution_a1 --+
-         |                                       |--> shared state v1
-         +---> peer_b round-1 ---> solution_b1 --+
-                                                  |
-              (both see shared state v1: a1 + b1)
-                                                  |
-         +---> peer_a round-2 ---> refined_a2  --+
-         |                                       |--> shared state v2
-         +---> peer_b round-2 ---> refined_b2  --+
-                                                  |
-              (both see shared state v2: a1 + b1 + a2 + b2)
-                                                  |
-         +---> peer_a round-3 ---> final_a3
-         |
-         +---> peer_b round-3 ---> final_b3
-```
+| schema | slime<sup>n</sup> |
+|:---:|:---:|
+| ![shared-state schema](./imgs/schema.png) | ![shared-state framework](./imgs/arch.png) |
+
+*Left: two symmetric peers alternately read and write a versioned shared state across 3 rounds (v1 = a1+b1, v2 = a1+b1+a2+b2), each round's state feeding both peers in the next. Right: two trainable peer pairs (Megatron + SGLang), each with its own buffer.*
 
 Both peers are structurally identical and trainable. No hierarchy, no coordinator
 role. The shared state is passive prompt stitching: each round's prompt includes
