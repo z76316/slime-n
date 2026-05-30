@@ -1,48 +1,17 @@
-# Multi-policy multi-agent config — single source of truth.
+# Multi-policy config — three cooperating policies on DAPO-math-17k.
+#   Pipeline (N=num_parallel=4 per role): solver → rewriter (sees all N) →
+#   selector (picks best, "Judgment: IDX").
+#   Reward (RLVR): solver/rewriter scored directly; selector inherits its
+#   picked rewriter's reward. Group shaping ×1.2 if mean selector reward > 0.5
+#   else ×0.8; raw rewards kept if no selector parses (anti-train guard).
+#   Each policy is its own Megatron actor + 1:1 sglang engine; buffer_mode=split
+#   routes Sample.policy_name; n_samples_per_prompt = num_parallel = 4.
 #
-# Task: three cooperating policies on math problems (DAPO-math-17k).
-#   Pipeline (N=num_parallel=4 trajectories per role per prompt):
-#     1. solver    — N parallel solvers each produce a candidate solution.
-#     2. rewriter  — N parallel rewriters each see ALL N solver candidates and
-#                    synthesize a refined solution (one per worker).
-#     3. selector  — N parallel selectors each see ALL N rewriter candidates
-#                    and emit "Judgment: IDX" picking one as best.
-#
-#   Reward (verifiable reward / RLVR scores correctness per role):
-#     - solver/rewriter: direct correctness reward from the verifier.
-#     - selector: inherits the reward of whichever rewriter candidate it picked.
-#     - Group shaping: if mean parsed-selector reward > 0.5, all three roles'
-#       rewards × correct_reward_weight (1.2); else × incorrect_reward_weight
-#       (0.8). When every selector fails to parse, raw rewards are preserved
-#       (anti-train guard — broken selector must not penalize correct upstream).
-#
-#   Each policy is its own Megatron actor paired 1:1 with its own sglang engine
-#   (buffer_mode=split routes Sample.policy_name to the matching policy's
-#   buffer; n_samples_per_prompt = num_parallel = 4 for GRPO group-norm).
-#
-# Each entry under `policies:`:
-#   name, role                           — identity
-#   hf_checkpoint                        — base model
-#   load, save                           — checkpoint dirs (per-policy)
-#   ref_load                             — KL ref checkpoint (optional)
-#   buffer_mode                          — "split" | "shared". Routes Sample.policy_name.
-#   num_gpus_per_node                    — per-policy GPU slice size on each side
-#   megatron_num_nodes                   — Megatron actor placement (world_size = nodes × num_gpus_per_node)
-#   sglang_num_nodes                     — sglang engine placement for this policy's 1:1 engine
-#                                          (sglang_num_nodes × num_gpus_per_node must equal
-#                                           sum(sglang.server_groups[].num_gpus))
-#   megatron:                            — Megatron training (parallel, recompute, batching, optimizer, loss)
-#   sglang:                              — sglang engine deployment (server args, server_groups)
-#
-# 1:1 pairing is implicit: each policy entry owns exactly one sglang block.
-# The policy's `name` is reused as the sglang server name (used by get_model_url
-# and Sample.policy_name).
-#
-# Cluster sizing (derivable from this file):
-#   total_megatron_gpus = sum(policies[i].megatron_num_nodes * num_gpus_per_node)
-#   total_sglang_gpus   = sum(policies[i].sglang_num_nodes   * num_gpus_per_node)
-#   ray_num_gpus = max(total_megatron_gpus, total_sglang_gpus)  # with --colocate
-#                = total_megatron_gpus + total_sglang_gpus       # without --colocate
+# Per-policy keys: name/role, hf_checkpoint, load/save, ref_load (opt),
+#   buffer_mode, num_gpus_per_node, megatron_num_nodes, sglang_num_nodes,
+#   megatron: (training), sglang: (engine). The policy name is reused as the
+#   sglang server name. ray_num_gpus = max(Σmegatron, Σsglang) with --colocate,
+#   else Σmegatron + Σsglang.
 
 policies:
 
@@ -80,8 +49,7 @@ policies:
       accumulate_allreduce_grads_in_fp32: true
       attention_softmax_in_fp32: true
 
-      # Chunk the [T, V] logits along T to bound forward peak (152K vocab is
-      # heavy on L40S). Set to -1 to disable.
+      # Chunk logits along T to bound forward peak; -1 disables.
       log_probs_chunk_size: 512
 
       micro_batch_size: 1
@@ -161,8 +129,7 @@ policies:
       accumulate_allreduce_grads_in_fp32: true
       attention_softmax_in_fp32: true
 
-      # Chunk the [T, V] logits along T to bound forward peak (152K vocab is
-      # heavy on L40S). Set to -1 to disable.
+      # Chunk logits along T to bound forward peak; -1 disables.
       log_probs_chunk_size: 512
 
       micro_batch_size: 1
@@ -233,8 +200,7 @@ policies:
       accumulate_allreduce_grads_in_fp32: true
       attention_softmax_in_fp32: true
 
-      # Chunk the [T, V] logits along T to bound forward peak (152K vocab is
-      # heavy on L40S). Set to -1 to disable.
+      # Chunk logits along T to bound forward peak; -1 disables.
       log_probs_chunk_size: 512
 
       micro_batch_size: 1

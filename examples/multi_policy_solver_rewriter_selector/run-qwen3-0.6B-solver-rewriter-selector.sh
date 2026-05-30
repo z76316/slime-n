@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# for rerun the task
+# clean up before rerun
 pkill -9 sglang
 sleep 3
 ray stop --force
@@ -12,7 +12,7 @@ pkill -9 python
 
 set -ex
 
-# will prevent ray from buffering stdout/stderr
+# prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=16
 
 NVLINK_COUNT=$(nvidia-smi topo -m 2>/dev/null | grep -o 'NV[0-9][0-9]*' | wc -l)
@@ -26,9 +26,7 @@ echo "HAS_NVLINK: $HAS_NVLINK (detected $NVLINK_COUNT NVLink references)"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/../../scripts/models/qwen3-0.6B.sh"
 
-# Per-policy fields (parallel, recompute, batching, optimizer, loss, paths)
-# all live in config.yaml — one block per actor.
-# Globals (rollout cadence, wandb, sglang infra, attention defaults) stay as CLI args.
+# Per-policy fields live in config.yaml; globals (rollout cadence, wandb) stay CLI args.
 
 ROLLOUT_ARGS=(
    --custom-generate-function-path examples.multi_policy_solver_rewriter_selector.rollout_with_multi_agents.generate_with_multi_agents
@@ -46,36 +44,22 @@ ROLLOUT_ARGS=(
    --rollout-temperature 1
    --balance-data
 )
-# n_samples_per_prompt and global_batch_size are projected onto manager-global
-# args from config.yaml's first policy by _set_multi_policy_global_defaults,
-# so we don't pass them on the CLI (would silently shadow the per-policy values).
+# n_samples_per_prompt / global_batch_size come from config.yaml's first policy
+# (via _set_multi_policy_global_defaults); passing them on CLI would shadow per-policy values.
 
-# Cluster sizing — derived from config.yaml:
-#   actor_gpus   = sum(policies[i].megatron_num_nodes * num_gpus_per_node)
-#                = 3 × 1 × 1 = 3
-#   rollout_gpus = sum(policies[i].sglang_num_nodes   * num_gpus_per_node)
-#                = 3 × 1 × 1 = 3
-#   total (colocate) = max(actor_gpus, rollout_gpus) = 3
-#   total (separate) = actor_gpus + rollout_gpus     = 6
-# 4-L40S box has 1 GPU spare with NUM_GPUS=3.
+# Cluster sizing from config.yaml: 3 actor + 3 sglang GPUs.
+#   colocate = max(3, 3) = 3; separate = 6. (4-L40S box: 1 spare.)
 NUM_GPUS=3
 
 TRAIN_ARGS=(
    --config "${SCRIPT_DIR}/config.yaml"
    --save-interval 5
    --train-memory-margin-bytes 0
-   # Per-role rollout/train data dumps land under
-   #   <dump-details>/<policy_name>/rollout_data/<rollout_id>.pt
-   #   <dump-details>/<policy_name>/train_data/<rollout_id>_<rank>.pt
-   #   <dump-details>/<policy_name>/packed_data/<rollout_id>_<rank>.pt
+   # Per-role dumps: <dump-details>/<policy_name>/{rollout,train,packed}_data/...
    --dump-details /tmp/multi_policy_solver_rewriter_selector/dump_details
 )
-# Note: train_multi_policy.py derives args.rollout_num_gpus from config.yaml
-# (sum of sglang_num_nodes × num_gpus_per_node across policies), so no
-# --rollout-num-gpus flag is needed.
-# config.yaml is the single source of truth: one entry per policy holding
-# Megatron training, orchestration (buffer_mode, GPU placement), and the
-# 1:1-paired sglang engine sub-block.
+# rollout_num_gpus is derived from config.yaml, so no --rollout-num-gpus needed.
+# config.yaml is the single source of truth (one entry per policy).
 
 EVAL_ARGS=(
    --eval-interval 2
@@ -85,26 +69,17 @@ EVAL_ARGS=(
    --eval-top-p 1
 )
 
-# PERF and OPTIMIZER are per-policy in config.yaml.
-# Each policy declares its own: tensor_model_parallel_size, sequence_parallel,
-# recompute_*, use_dynamic_batch_size, max_tokens_per_gpu, optimizer, lr,
-# lr_decay_style, weight_decay, adam_beta*, optimizer_cpu_offload, etc.
+# Perf/optimizer flags are per-policy in config.yaml.
 
 WANDB_ARGS=(
-   #--use-wandb
-   # --wandb-project slime-dev
-   # --wandb-group qwen3-0.6B-solver-rewriter-selector
+   --use-wandb
+   --wandb-project slime-dev
+   --wandb-group qwen3-0.6B-solver-rewriter-selector
 )
 
 # sglang server args are per-policy in config.yaml (sglang sub-block).
-# Each policy declares its own: model_path, num_gpus_per_engine, mem_fraction_static,
-# cuda_graph_bs, chunked_prefill_size, max_running_requests, attention_backend, server_groups, etc.
-
-# Megatron numerical / dropout flags (attention_dropout, hidden_dropout,
-# accumulate_allreduce_grads_in_fp32, attention_softmax_in_fp32) live in
-# config.yaml's per-policy megatron: block — they belong there alongside
-# tensor_model_parallel_size etc. RL-correctness invariants (zero dropout,
-# fp32 reductions/softmax) are policy-level concerns, not run-level.
+# Megatron numerical/dropout flags are per-policy too (RL-correctness invariants
+# are policy-level, not run-level).
 
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus ${NUM_GPUS} --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
@@ -116,12 +91,8 @@ RUNTIME_ENV_JSON="{
     \"NCCL_NVLS_ENABLE\": \"${HAS_NVLINK}\"
   }
 }"
-# NOTE: do NOT set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True here —
-# torch_memory_saver (which sglang uses for colocate-mode pause/resume)
-# refuses to initialize when expandable_segments is enabled. Choose one:
-# colocate offload OR expandable segments. We need offload, so we skip
-# expandable segments and rely on the other knobs (smaller chunk sizes,
-# zero margin, smaller mem_fraction) for fragmentation control.
+# Do NOT set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True — torch_memory_saver
+# (sglang colocate pause/resume) won't init with it. We need offload, so skip it.
 
 ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \

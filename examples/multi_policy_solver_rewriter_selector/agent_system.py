@@ -14,14 +14,13 @@ from .prompts import SOLVER_PROMPT_TEMPLATE, generate_rewriter_template, generat
 
 logger = logging.getLogger(__name__)
 
-# Unique-index source for inner samples spawned inside run_agent_system; without
-# this, all num_parallel siblings inherit the outer prompt's index and trip
-# get_data_iterator's uniqueness assertion.
+# Unique index for inner samples; siblings would otherwise share the outer
+# prompt's index and trip get_data_iterator's uniqueness assertion.
 _INNER_SAMPLE_ID = itertools.count(start=1_000_000_000)
 
 
-# Strip Qwen/sglang chat-control tokens so chat-formatted text can be embedded
-# inside another prompt body without nesting chat structures.
+# Strip chat-control tokens so chat text can be embedded in another prompt
+# without nesting chat structures.
 _CHAT_TOKEN_RE = re.compile(r"<\|im_(?:start|end)\|>(?:user|assistant|system)?\s*")
 
 
@@ -47,8 +46,7 @@ async def generate_response(args, prompt, key):
         max_context_length = args.rollout_max_context_len
         sample = deepcopy(args.sample)
 
-        # Multi-policy: route to the sglang engine paired with this role.
-        # `key` ∈ {"solver", "rewriter", "selector"} matches a name in --sglang-config.
+        # Route to the sglang engine paired with this role (key matches --sglang-config).
         url = get_model_url(args, key)
 
         sample.prompt = prompt
@@ -76,12 +74,11 @@ async def generate_response(args, prompt, key):
         if not new_response_tokens:
             return None
 
-        # Update sample with tokens directly - avoiding re-tokenization
+        # Append tokens directly, avoiding re-tokenization.
         sample.tokens = sample.tokens + new_response_tokens
         sample.response_length += len(new_response_tokens)
         sample.response = output["text"]
-        # Save sglang's per-token logprobs so train-side can compute
-        # train_rollout_logprob_abs_diff (and tis_* if --use-tis is on).
+        # Keep per-token logprobs for train-side train_rollout_logprob_abs_diff / tis_*.
         if sample.rollout_log_probs is None:
             sample.rollout_log_probs = []
         sample.rollout_log_probs += new_response_log_probs
@@ -94,10 +91,8 @@ async def generate_response(args, prompt, key):
             case "stop":
                 sample.status = Sample.Status.COMPLETED
 
-        # Multi-policy: tag the sample so the manager routes it to the right
-        # policy's buffer. Also assign a unique index — the deepcopy from
-        # args.sample inherits the outer prompt's index, which would collide
-        # across the num_parallel siblings from this call.
+        # Tag for buffer routing and give a unique index (the deepcopy inherits
+        # the outer prompt's index, which would collide across siblings).
         sample.policy_name = key
         sample.index = next(_INNER_SAMPLE_ID)
         args.results_dict[key].append(sample)
@@ -159,21 +154,16 @@ class RewriterAgent(Agent):
         super().__init__()
 
     async def rewrite(self, args, problem_statement, previous_solutions: list[str]) -> str:
-        """Generates the rewrited solution."""
-
-        # Build the prompt template dynamically.
+        """Generate the rewritten solution."""
         template = generate_rewriter_template(len(previous_solutions))
 
-        # Populate the template arguments.
-        # problem_statement comes in raw (no chat tokens). Solutions are model
-        # outputs which may carry stray <|im_end|> — strip those too.
+        # problem_statement is raw; strip stray chat tokens from model-output solutions.
         format_params = {"problem_statement": problem_statement}
         for i, solution in enumerate(previous_solutions):
             format_params[f"solution{i+1}"] = _strip_chat_tokens(solution)
 
         body = template.format(**format_params)
-        # Wrap as a proper user turn so the model sees an unambiguous chat msg.
-        prompt = _wrap_user_turn(args.tokenizer, body)
+        prompt = _wrap_user_turn(args.tokenizer, body)  # wrap as a user turn
         return await self.run(args, prompt, max_retries=1, key="rewriter")
 
 
@@ -184,13 +174,10 @@ class SelectorAgent(Agent):
         super().__init__()
 
     async def select(self, args, problem_statement, candidate_solutions: list[str]) -> str:
-        """Generates the rewrited solution."""
-
-        # Build the prompt template dynamically.
+        """Generate the selector judgment."""
         template = generate_select_template(len(candidate_solutions))
 
-        # Populate the template arguments.
-        # problem_statement is raw (no chat tokens); solutions are stripped too.
+        # problem_statement is raw; solutions are stripped of chat tokens too.
         format_params = {"problem_statement": problem_statement}
         for i, solution in enumerate(candidate_solutions):
             format_params[f"solution{i+1}"] = _strip_chat_tokens(solution)
@@ -200,9 +187,7 @@ class SelectorAgent(Agent):
         return await self.run(args, prompt, max_retries=10, key="selector")
 
     def extract_selected_solution_idx(self, response: str, candidate_solutions: list[str]) -> int:
-        """Extracts the selected solution ID from the response.
-        Accepts variants the model emits: "Judgment: 1", "Judgment: IDX 1",
-        "Judgment: Solution 1", "Judgment: #1"."""
+        """Extract the selected solution index. Accepts "Judgment: 1 / IDX 1 / Solution 1 / #1"."""
         PATTERN = re.compile(r"Judgment:\s*(?:IDX|Solution)?\s*#?(\d+)", re.IGNORECASE)
         matched = PATTERN.findall(response)
         if not matched:
@@ -225,10 +210,7 @@ async def rewrite_worker(args, previous_solutions, problem_statement, worker_id)
 
 
 async def solver_worker(args, problem_statement, worker_id):
-    """
-    Run a single solver pipeline.
-    """
-
+    """Run a single solver pipeline."""
     try:
         solver = SolverAgent()
         current_solution = await solver.generate_initial_solution(args, problem_statement)
@@ -241,8 +223,7 @@ async def solver_worker(args, problem_statement, worker_id):
 
 
 async def select_worker(args, problem_statement, candidate_solutions, worker_id):
-    """Run a single selector. Multiple selectors run in parallel so the selector
-    policy gets `num_parallel` trajectories per problem (needed for GRPO group-norm)."""
+    """Run one selector; num_parallel run in parallel to give GRPO its group per problem."""
     try:
         selector = SelectorAgent()
         response = await selector.select(args, problem_statement, candidate_solutions)
@@ -256,15 +237,10 @@ async def select_worker(args, problem_statement, candidate_solutions, worker_id)
 def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None = None):
     """Top up `args.results_dict[role]` to exactly `target_count` samples.
 
-    Multi-policy split-buffer routing requires each policy's buffer per
-    rollout to equal global_batch_size. When a phase early-exits or some
-    workers fail, the role's buffer ends up short and the next training
-    step trips:
-        assert len(set(sum(micro_batch_indices, []))) == num_local_samples
-    in slime/backends/megatron_utils/data.py.
-
+    Split-buffer routing needs each role's per-rollout buffer to match
+    global_batch_size; a short buffer trips data.py's num_local_samples assert.
     Pad with zero-response placeholders so failed phases don't leak donor
-    response tokens/logprobs into another policy's split buffer.
+    tokens/logprobs into another policy's buffer.
     """
     samples = args.results_dict[role]
     if len(samples) >= target_count:
@@ -319,8 +295,7 @@ def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None 
         placeholder.response_content = None
         placeholder.reason_content = None
         placeholder.tokens = prompt_tokens
-        # train_data collection checks the first sample only. Keep placeholder
-        # logprobs present only when this final role buffer has real logprobs.
+        # train_data checks the first sample only; match the buffer's logprob presence.
         placeholder.rollout_log_probs = [] if role_has_logprobs else None
         placeholder.rollout_routed_experts = None
         placeholder.teacher_log_probs = None
@@ -328,19 +303,13 @@ def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None 
 
 
 async def run_agent_system(args, sample):
-    """
-    Run `num_parallel` pipelines concurrently.
-    """
-
-    args = deepcopy(args)  # Deep copy args because rollout_with_multi_agents mutates them.
+    """Run `num_parallel` pipelines concurrently."""
+    args = deepcopy(args)  # rollout_with_multi_agents mutates args
     args.sample = sample
     args.results_dict = {"solver": [], "rewriter": [], "selector": []}
 
-    # Solver gets the chat-formatted prompt straight through (sglang expects
-    # chat format). Rewriter / selector embed the problem inside their own
-    # template — they need the RAW text, not the chat-tagged version, or we
-    # end up with nested <|im_start|>user...<|im_end|> structures that
-    # confuse the model.
+    # Solver uses the chat-formatted prompt directly; rewriter/selector embed the
+    # RAW problem in their own template to avoid nested chat structures.
     solver_prompt = sample.prompt
     raw_problem = _strip_chat_tokens(sample.prompt)
     tasks = [solver_worker(args, solver_prompt, worker_id) for worker_id in range(args.num_parallel)]
@@ -361,22 +330,19 @@ async def run_agent_system(args, sample):
 
     if len(previous_solutions) == 0:
         reward_adjustment(args.results_dict["solver"], args.incorrect_reward_weight)
-        # Pad all three roles so each policy's per-rollout buffer count is the
-        # same regardless of which phase early-exits. Slime's get_data_iterator
-        # asserts num_local_samples == num_local_gbs and trips otherwise.
+        # Pad all roles to equal per-rollout counts (get_data_iterator asserts this).
         _pad_role_buffer(args, "solver", n)
         _pad_role_buffer(args, "rewriter", n, donor_role="solver")
         _pad_role_buffer(args, "selector", n, donor_role="solver")
         return args.results_dict["solver"] + args.results_dict["rewriter"] + args.results_dict["selector"]
 
-    # Rewriting — feed the raw (un-chat-templated) problem to the rewriter
-    # template so the inner solver chat tokens don't leak through.
+    # Rewriting — feed the raw problem so solver chat tokens don't leak through.
     tasks = [
         rewrite_worker(args, previous_solutions, raw_problem, worker_id) for worker_id in range(args.num_parallel)
     ]
     rewrited_solutions_raw = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Filter out failed tasks and keep only valid rewritten solutions.
+    # Keep only valid rewritten solutions.
     rewrited_solutions = []
     for _i, result in enumerate(rewrited_solutions_raw):
         if isinstance(result, str):
@@ -394,11 +360,9 @@ async def run_agent_system(args, sample):
         _pad_role_buffer(args, "selector", n, donor_role="solver")
         return args.results_dict["solver"] + args.results_dict["rewriter"] + args.results_dict["selector"]
 
-    # Selection — run num_parallel selectors so the selector policy gets enough
-    # trajectories per problem for GRPO group-norm (matches n_samples_per_prompt).
-    # Selector also receives the raw problem (no chat tokens) — its template
-    # will chat-template the whole thing as a user turn.
-    selector = SelectorAgent()  # used for extract_selected_solution_idx
+    # Selection — num_parallel selectors for GRPO group-norm; selector gets the
+    # raw problem and chat-templates it itself.
+    selector = SelectorAgent()  # for extract_selected_solution_idx
     tasks = [select_worker(args, raw_problem, rewrited_solutions, worker_id) for worker_id in range(args.num_parallel)]
     await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -410,13 +374,9 @@ async def run_agent_system(args, sample):
         _pad_role_buffer(args, "selector", n, donor_role="solver")
         return args.results_dict["solver"] + args.results_dict["rewriter"] + args.results_dict["selector"]
 
-    # Assign each selector trajectory its own reward based on which rewriter solution
-    # it picked. Use sample.response_content (set by generate_response) so the order
-    # of args.results_dict["selector"] doesn't have to match task order.
-    # Track parsing success — selectors that fail to emit a parseable judgment
-    # must NOT contribute to mean_selector_reward, otherwise a parse failure
-    # (e.g. "Judgment: IDX.AUTHOR") penalizes correct solvers/rewriters
-    # (anti-train).
+    # Reward each selector by the rewriter solution it picked (matched via
+    # response_content, so order is irrelevant). Unparseable judgments are
+    # excluded from mean_selector_reward to avoid anti-training correct upstream.
     parsed_selector_rewards: list[float] = []
     for sel_sample in args.results_dict["selector"]:
         response = sel_sample.response_content
@@ -435,11 +395,8 @@ async def run_agent_system(args, sample):
                 break
         parsed_selector_rewards.append(sel_sample.reward)
 
-    # Global reward shaping: if the average parsed selector reward suggests
-    # success, bonus all roles; otherwise penalize. If every selector failed
-    # to parse, we have no judgment signal — leave the raw rewards untouched
-    # so we don't anti-train correct solvers/rewriters when the selector
-    # is broken in some prompt-specific way.
+    # Group shaping: bonus all roles if mean selector reward is high, else penalize.
+    # If no selector parsed, leave raw rewards (no judgment signal — don't anti-train).
     if not parsed_selector_rewards:
         _pad_role_buffer(args, "solver", n)
         _pad_role_buffer(args, "rewriter", n, donor_role="solver")
@@ -452,7 +409,7 @@ async def run_agent_system(args, sample):
     reward_adjustment(args.results_dict["rewriter"], weight)
     reward_adjustment(args.results_dict["selector"], weight)
 
-    # Final guard: ensure each role's buffer is exactly num_parallel.
+    # Final guard: each role buffer = num_parallel.
     _pad_role_buffer(args, "solver", n)
     _pad_role_buffer(args, "rewriter", n, donor_role="solver")
     _pad_role_buffer(args, "selector", n, donor_role="solver")

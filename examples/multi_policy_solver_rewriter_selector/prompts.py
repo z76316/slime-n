@@ -1,11 +1,11 @@
-## Prompt templates used to generate different prompt variants.
+# Prompt templates.
 
 
 SOLVER_PROMPT_TEMPLATE = """{problem_statement}"""
 
 
 def generate_rewriter_template(num_solutions: int) -> str:
-    """Dynamically generate rewrite templates based on the number of solutions."""
+    """Build the rewriter template for `num_solutions` solutions."""
     solution_sections = []
     for i in range(num_solutions):
         solution_sections.append(f"#### Solution {i+1}\n{{solution{i+1}}}\n\n---")
@@ -34,7 +34,7 @@ Refer to the following {num_solutions} solutions and solve the problem.
 
 
 def generate_select_template(num_solutions: int) -> str:
-    """Dynamically generate select templates based on the number of solutions."""
+    """Build the selector template for `num_solutions` solutions."""
     solution_sections = []
     for i in range(num_solutions):
         solution_sections.append(f"#### Solution {i+1}\n{{solution{i+1}}}\n\n---")
