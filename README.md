@@ -50,13 +50,13 @@ A trainable student paired with a frozen teacher that returns per-token logprobs
 
 Multiple trainable policies cooperating in a single run — debate, candidate generation + synthesis, cooperative swarms, generator/verifier loops, orchestrator + subagents, shared-state rounds, and staged solver pipelines.
 
-**3.1 Multi-Agent Debate**
+**3.1 Consensus Debate**
 
-N generator agents propose independent answers, then in later rounds each critic agent revises its own answer against a summary of the other agents' responses, with the majority-vote answer as the only training signal. Code: [`examples/multi_policy_multiagent_debate`](examples/multi_policy_multiagent_debate).
+N generator agents propose independent answers, then in later rounds each critic agent revises its own answer against a summary of the other agents' responses, with the majority-vote answer as the only training signal. Code: [`examples/multi_policy_consensus_debate`](examples/multi_policy_consensus_debate).
 
 | schema | slime<sup>n</sup> |
 |:---:|:---:|
-| ![Debate schema](./examples/multi_policy_multiagent_debate/imgs/schema.png) | ![Debate framework](./examples/multi_policy_multiagent_debate/imgs/arch.png) |
+| ![Consensus debate schema](./examples/multi_policy_consensus_debate/imgs/schema.png) | ![Consensus debate framework](./examples/multi_policy_consensus_debate/imgs/arch.png) |
 
 **3.2 Solver + Summarizer**
 
@@ -177,9 +177,9 @@ Cluster sizing is derived from the YAML. Without `--colocate`, total GPUs are `s
 
 Two multi-agent cooperations trained on DAPO-math-17k. In both, every policy carries its own optimizer and split buffer, and rewards rise jointly.
 
-**Multi-Agent Debate** — generator + critic, with the ŷ majority vote over critic outputs as the only signal (gold label ignored). Code: [`examples/multi_policy_multiagent_debate`](examples/multi_policy_multiagent_debate).
+**Consensus Debate** — generator + critic, with the ŷ majority vote over critic outputs as the only signal (gold label ignored). Code: [`examples/multi_policy_consensus_debate`](examples/multi_policy_consensus_debate).
 
-![multi-agent debate training reward](./examples/multi_policy_multiagent_debate/imgs/reward.png)
+![consensus debate training reward](./examples/multi_policy_consensus_debate/imgs/reward.png)
 
 **Solver + Summarizer** — solver emits N candidates, summarizer synthesizes a final `\boxed{...}` answer; both get RLVR correctness rewards plus summarizer-phase group shaping. Code: [`examples/multi_policy_solver_summarizer`](examples/multi_policy_solver_summarizer).
 

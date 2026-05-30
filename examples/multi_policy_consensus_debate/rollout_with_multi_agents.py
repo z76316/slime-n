@@ -6,7 +6,7 @@ from slime.utils.misc import load_function
 from slime.utils.types import Sample
 
 MULTI_AGENT_CONFIGS = {
-    "custom_multi_agent_function_path": "examples.multi_policy_multiagent_debate.agent_system.run_agent_system",
+    "custom_multi_agent_function_path": "examples.multi_policy_consensus_debate.agent_system.run_agent_system",
     # num_parallel = paper's `agents`. Counterfactual reward needs ≥ 3 to
     # avoid the degenerate summarize-1-response case (see plan §1).
     "num_parallel": 3,

@@ -31,7 +31,7 @@ source "${SCRIPT_DIR}/../../scripts/models/qwen3-0.6B.sh"
 # CLI args.
 
 ROLLOUT_ARGS=(
-   --custom-generate-function-path examples.multi_policy_multiagent_debate.rollout_with_multi_agents.generate_with_multi_agents
+   --custom-generate-function-path examples.multi_policy_consensus_debate.rollout_with_multi_agents.generate_with_multi_agents
    --prompt-data /root/dapo-math-17k/dapo-math-17k.jsonl
    --input-key prompt
    --label-key label
@@ -63,7 +63,7 @@ TRAIN_ARGS=(
    #   <dump-details>/<policy_name>/rollout_data/<rollout_id>.pt
    #   <dump-details>/<policy_name>/train_data/<rollout_id>_<rank>.pt
    #   <dump-details>/<policy_name>/packed_data/<rollout_id>_<rank>.pt
-   --dump-details /tmp/multi_policy_multiagent_debate/dump_details
+   --dump-details /tmp/multi_policy_consensus_debate/dump_details
 )
 
 EVAL_ARGS=(
@@ -75,7 +75,7 @@ EVAL_ARGS=(
 WANDB_ARGS=(
    #--use-wandb
    #--wandb-project slime-dev
-   #--wandb-group qwen3-0.6B-multiagent-debate
+   #--wandb-group qwen3-0.6B-consensus-debate
 )
 
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}

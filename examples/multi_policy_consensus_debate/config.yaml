@@ -57,7 +57,7 @@ policies:
     role: actor
 
     hf_checkpoint: /root/Qwen3-0.6B
-    save: /ckpt/multi_policy_multiagent_debate/qwen3-0.6b/generator
+    save: /ckpt/multi_policy_consensus_debate/qwen3-0.6b/generator
 
     buffer_mode: split
 
@@ -129,7 +129,7 @@ policies:
     role: actor
 
     hf_checkpoint: /root/Qwen3-0.6B
-    save: /ckpt/multi_policy_multiagent_debate/qwen3-0.6b/critic
+    save: /ckpt/multi_policy_consensus_debate/qwen3-0.6b/critic
 
     buffer_mode: split
 
