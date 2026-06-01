@@ -16,7 +16,7 @@ policies:
 
     num_gpus_per_node: 1
     megatron_num_nodes: 1
-    sglang_num_nodes: 1
+    sglang_num_nodes: 3        # 3 data-parallel sglang engines for rollout throughput
 
     megatron:
       megatron_to_hf_mode: bridge
@@ -68,15 +68,14 @@ policies:
       # No colocate: engines have their own GPUs. Use a higher mem_fraction
       # since we don't need to leave room for a colocated trainer.
       mem_fraction_static: 0.85
-      cuda_graph_bs: [1, 2, 4, 8, 16, 32]
       chunked_prefill_size: 4096
-      max_running_requests: 32
-      max_total_tokens: 131072
+      max_running_requests: 512
+      # max_total_tokens: 131072
       log_level: info
 
       server_groups:
         - worker_type: regular
-          num_gpus: 1
+          num_gpus: 3        # must equal sglang_num_nodes × num_gpus_per_node
 
   # ─── summarizer ───────────────────────────────────────────────────────────
   - name: summarizer
@@ -89,7 +88,7 @@ policies:
 
     num_gpus_per_node: 1
     megatron_num_nodes: 1
-    sglang_num_nodes: 1
+    sglang_num_nodes: 3        # 3 data-parallel sglang engines for rollout throughput
 
     megatron:
       megatron_to_hf_mode: bridge
@@ -137,12 +136,11 @@ policies:
       num_gpus_per_engine: 1
 
       mem_fraction_static: 0.85
-      cuda_graph_bs: [1, 2, 4, 8, 16, 32]
       chunked_prefill_size: 4096
-      max_running_requests: 32
-      max_total_tokens: 131072
+      max_running_requests: 512
+      # max_total_tokens: 131072
       log_level: info
 
       server_groups:
         - worker_type: regular
-          num_gpus: 1
+          num_gpus: 3        # must equal sglang_num_nodes × num_gpus_per_node

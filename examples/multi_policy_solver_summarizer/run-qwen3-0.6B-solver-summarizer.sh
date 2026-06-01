@@ -51,10 +51,11 @@ ROLLOUT_ARGS=(
 
 # Cluster sizing — derived from config.yaml (NO colocate):
 #   actor_gpus   = sum(megatron_num_nodes * num_gpus_per_node) = 2 × 1 × 1 = 2
-#   rollout_gpus = sum(sglang_num_nodes   * num_gpus_per_node) = 2 × 1 × 1 = 2
-#   total        = actor_gpus + rollout_gpus                   = 4
-# Layout: GPUs 0,1 = solver+summarizer Megatron actors; GPUs 2,3 = sglang engines.
-NUM_GPUS=4
+#   rollout_gpus = sum(sglang_num_nodes   * num_gpus_per_node) = 2 × 3 × 1 = 6
+#   total        = actor_gpus + rollout_gpus                   = 8
+# Layout (8×H200): GPUs 0,1 = solver+summarizer Megatron actors;
+#   GPUs 2-4 = 3 solver sglang engines; GPUs 5-7 = 3 summarizer sglang engines.
+NUM_GPUS=8
 
 TRAIN_ARGS=(
    --config "${SCRIPT_DIR}/config.yaml"
