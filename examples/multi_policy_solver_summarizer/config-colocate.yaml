@@ -21,7 +21,7 @@ policies:
 
     megatron:
       megatron_to_hf_mode: bridge
-      tensor_model_parallel_size: 1
+      tensor_model_parallel_size: 2        # shard vocab-parallel logits across 2 GPUs to bound the 32768-token CE peak
       pipeline_model_parallel_size: 1
       context_parallel_size: 1
       expert_model_parallel_size: 1
@@ -96,7 +96,7 @@ policies:
 
     megatron:
       megatron_to_hf_mode: bridge
-      tensor_model_parallel_size: 1
+      tensor_model_parallel_size: 2        # shard vocab-parallel logits across 2 GPUs to bound the 32768-token CE peak
       pipeline_model_parallel_size: 1
       context_parallel_size: 1
       expert_model_parallel_size: 1

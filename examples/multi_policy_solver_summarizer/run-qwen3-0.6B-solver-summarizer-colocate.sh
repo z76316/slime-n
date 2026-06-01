@@ -11,8 +11,8 @@
 #   actor_gpus   = sum(megatron_num_nodes * num_gpus_per_node) = 2 × 1 × 4 = 8
 #   rollout_gpus = sum(sglang_num_nodes   * num_gpus_per_node) = 2 × 1 × 4 = 8
 #   total        = max(actor_gpus, rollout_gpus)               = 8
-# Layout: GPUs 0-3 host solver     (DP-4 Megatron + 4 SGLang engines, timeshared)
-#         GPUs 4-7 host summarizer (DP-4 Megatron + 4 SGLang engines, timeshared)
+# Layout: GPUs 0-3 host solver     (TP-2×DP-2 Megatron + 4 SGLang engines, timeshared)
+#         GPUs 4-7 host summarizer (TP-2×DP-2 Megatron + 4 SGLang engines, timeshared)
 #
 # H200 tuning lives in config-colocate.yaml: mem_fraction_static 0.5 (sglang and
 # the trainer timeshare each policy's 4 GPUs — sglang is paused during the train
@@ -59,7 +59,7 @@ ROLLOUT_ARGS=(
    --rollout-shuffle
    --rm-type deepscaler
    --num-rollout 3000
-   --rollout-batch-size 128
+   --rollout-batch-size 32
    --disable-rollout-trim-samples
    --rollout-max-context-len 32768
    --rollout-max-response-len 32768
