@@ -106,16 +106,6 @@ The solver emits N candidates, the rewriter refines them after seeing all N, and
 |:---:|:---:|
 | ![Solver-Rewriter-Selector schema](./examples/multi_policy_solver_rewriter_selector/imgs/schema.png) | ![Solver-Rewriter-Selector framework](./examples/multi_policy_solver_rewriter_selector/imgs/arch.png) |
 
-
-
-
-## Implementation Details
-
-- **`train_multi_policy.py`** — driver for n≥1 trainable policies. Replaces `train.py` for multi-policy runs.
-- **YAML-driven configs** — `--config <path>.yaml`. Per-policy fields (parallelism, batching, optimizer, loss, paths, Megatron numerical / dropout, `log_probs_chunk_size`) live in the YAML; cluster sizing is derived from policies. See [`slime/utils/policy_config.py`](slime/utils/policy_config.py).
-- **Per-policy buffers (split mode)** — each policy trains on its own samples, tagged via `Sample.policy_name`.
-- **Per-policy weight sync** — serialized push from each Megatron actor to its paired sglang engine.
-
 ## Multi-Policy YAML Config
 
 Multi-policy runs are defined by a single YAML file passed with `--config`. The top-level `policies` list is the source of truth for the run composition: each entry declares one policy's identity, trainability, checkpoints, buffer routing, GPU slice, Megatron training settings, and optional SGLang engine settings. Policy names must be unique, and each paired policy gets a 1:1 SGLang server with the same name.
