@@ -24,11 +24,11 @@ from megatron.training.training import get_model
 from tqdm import tqdm
 
 from slime.utils import logging_utils, train_dump_utils
+
 try:
     from megatron.core.pipeline_parallel.utils import unwrap_model
 except ImportError:
     from megatron.core.utils import unwrap_model
-from slime.utils import logging_utils
 from slime.utils.memory_utils import clear_memory
 
 from .checkpoint import load_checkpoint, save_checkpoint
@@ -824,7 +824,6 @@ def train(
                 # Keys carry the role_tag (policy/critic) prefix; build them at runtime.
                 ppo_kl_key = f"train/{role_tag}ppo_kl"
                 clipfrac_key = f"train/{role_tag}pg_clipfrac"
-                kl_loss_key = f"train/{role_tag}kl_loss"
                 if step_id == 0 and ppo_kl_key in log_dict and clipfrac_key in log_dict:
                     # TODO: figure out why KL is not exactly zero when using PPO loss with KL clipping, and whether this is expected behavior or a bug.
                     assert log_dict["train/ppo_kl"] < 1e-8, f"{log_dict=}"

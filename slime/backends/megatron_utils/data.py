@@ -376,7 +376,10 @@ def log_rollout_data(
             ):
                 # TODO: figure out why there is a small numerical difference in log_probs and ref_log_probs in CI test, and whether it's expected or not.
                 assert (
-                    abs(reduced_log_dict[f"{metric_prefix}log_probs"] - reduced_log_dict[f"{metric_prefix}ref_log_probs"])
+                    abs(
+                        reduced_log_dict[f"{metric_prefix}log_probs"]
+                        - reduced_log_dict[f"{metric_prefix}ref_log_probs"]
+                    )
                     < 1e-8
                 )
             if f"{metric_prefix}log_probs" in reduced_log_dict:
