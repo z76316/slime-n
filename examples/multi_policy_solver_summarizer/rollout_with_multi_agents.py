@@ -29,5 +29,13 @@ async def generate_with_multi_agents(args, sample: Sample, sampling_params, eval
     custom_multi_agent_func = load_function(args.custom_multi_agent_function_path)
     samples = await custom_multi_agent_func(args, sample)
 
+    # All samples from one prompt share that prompt's group id: the rollout
+    # validator requires group_id on every sibling of a compact rollout, and
+    # after split-buffer routing each policy's n_samples_per_prompt samples
+    # then form one GRPO group (instead of falling back to per-sample index).
+    group_id = sample.group_id if sample.group_id is not None else sample.index
+    for s in samples:
+        s.group_id = group_id
+
     random.shuffle(samples)
     return samples
