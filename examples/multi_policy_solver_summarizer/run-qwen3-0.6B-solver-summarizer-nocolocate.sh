@@ -58,7 +58,7 @@ ROLLOUT_ARGS=(
 NUM_GPUS=8
 
 TRAIN_ARGS=(
-   --config "${SCRIPT_DIR}/config.yaml"
+   --config "${SCRIPT_DIR}/config-nocolocate.yaml"
    --save-interval 5
    # Per-role rollout/train data dumps land under
    #   <dump-details>/<policy_name>/rollout_data/<rollout_id>.pt

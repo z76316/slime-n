@@ -1,0 +1,149 @@
+# Solver + summarizer on DAPO-math-17k. Two trainable paired policies.
+# Cluster: 2 GPUs with --colocate (max(2 Megatron, 2 sglang); each policy's
+# actor and engine timeshare one GPU). Used by the -colocate launch script.
+# See README for the pipeline / reward shape.
+
+policies:
+
+  # ─── solver ───────────────────────────────────────────────────────────────
+  - name: solver
+    role: actor
+
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_solver_summarizer/qwen3-0.6b/solver
+    # ref_load: /ckpt/qwen3-0.6b-torch-dist   # uncomment to resume from torch_dist
+
+    buffer_mode: split
+
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+
+    megatron:
+      megatron_to_hf_mode: bridge
+      tensor_model_parallel_size: 1
+      pipeline_model_parallel_size: 1
+      context_parallel_size: 1
+      expert_model_parallel_size: 1
+      expert_tensor_parallel_size: 1
+
+      recompute_granularity: full
+      recompute_method: uniform
+      recompute_num_layers: 1
+
+      # RL-correctness defaults (zero dropout, fp32 reductions/softmax)
+      attention_dropout: 0.0
+      hidden_dropout: 0.0
+      accumulate_allreduce_grads_in_fp32: true
+      attention_softmax_in_fp32: true
+
+      log_probs_chunk_size: 512
+
+      micro_batch_size: 1
+      global_batch_size: 128
+      use_dynamic_batch_size: true
+      max_tokens_per_gpu: 8192
+
+      optimizer: adam
+      lr: 1.0e-6
+      lr_decay_style: constant
+      weight_decay: 0.1
+      adam_beta1: 0.9
+      adam_beta2: 0.98
+      optimizer_cpu_offload: true
+      overlap_cpu_optimizer_d2h_h2d: true
+      use_precision_aware_optimizer: true
+
+      advantage_estimator: grpo
+      n_samples_per_prompt: 4
+      eps_clip: 0.2
+      eps_clip_high: 0.28
+      kl_coef: 0
+      use_kl_loss: false
+      kl_loss_coef: 0
+
+    sglang:
+      update_weights: true
+      num_gpus_per_engine: 1
+
+      # No colocate: engines have their own GPUs. Use a higher mem_fraction
+      # since we don't need to leave room for a colocated trainer.
+      mem_fraction_static: 0.85
+      cuda_graph_bs: [1, 2, 4, 8, 16, 32]
+      chunked_prefill_size: 4096
+      max_running_requests: 32
+      max_total_tokens: 131072
+      log_level: info
+
+      server_groups:
+        - worker_type: regular
+          num_gpus: 1
+
+  # ─── summarizer ───────────────────────────────────────────────────────────
+  - name: summarizer
+    role: actor
+
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_solver_summarizer/qwen3-0.6b/summarizer
+
+    buffer_mode: split
+
+    num_gpus_per_node: 1
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+
+    megatron:
+      megatron_to_hf_mode: bridge
+      tensor_model_parallel_size: 1
+      pipeline_model_parallel_size: 1
+      context_parallel_size: 1
+      expert_model_parallel_size: 1
+      expert_tensor_parallel_size: 1
+
+      recompute_granularity: full
+      recompute_method: uniform
+      recompute_num_layers: 1
+
+      attention_dropout: 0.0
+      hidden_dropout: 0.0
+      accumulate_allreduce_grads_in_fp32: true
+      attention_softmax_in_fp32: true
+
+      log_probs_chunk_size: 512
+
+      micro_batch_size: 1
+      global_batch_size: 128
+      use_dynamic_batch_size: true
+      max_tokens_per_gpu: 8192
+
+      optimizer: adam
+      lr: 1.0e-6
+      lr_decay_style: constant
+      weight_decay: 0.1
+      adam_beta1: 0.9
+      adam_beta2: 0.98
+      optimizer_cpu_offload: true
+      overlap_cpu_optimizer_d2h_h2d: true
+      use_precision_aware_optimizer: true
+
+      advantage_estimator: grpo
+      n_samples_per_prompt: 4     # matches num_parallel in rollout fn
+      eps_clip: 0.2
+      kl_coef: 0
+      use_kl_loss: false
+      kl_loss_coef: 0
+
+    sglang:
+      update_weights: true
+      num_gpus_per_engine: 1
+
+      mem_fraction_static: 0.85
+      cuda_graph_bs: [1, 2, 4, 8, 16, 32]
+      chunked_prefill_size: 4096
+      max_running_requests: 32
+      max_total_tokens: 131072
+      log_level: info
+
+      server_groups:
+        - worker_type: regular
+          num_gpus: 1

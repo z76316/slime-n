@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Colocate variant of run-qwen3-0.6B-solver-summarizer.sh.
+# Colocate variant of run-qwen3-0.6B-solver-summarizer-nocolocate.sh.
 #
 # Same example, same task, same policies (solver + summarizer). The only
 # difference is `--colocate`: each policy's Megatron actor and SGLang
@@ -16,8 +16,8 @@
 #
 # 2 GPUs vs the 4 GPUs of the no-colocate variant.
 #
-# IMPORTANT — config.yaml memory tuning:
-#   The default config.yaml has `sglang.mem_fraction_static: 0.85` and
+# IMPORTANT — config-colocate.yaml memory tuning:
+#   config-colocate.yaml inherits `sglang.mem_fraction_static: 0.85` and
 #   `megatron.max_tokens_per_gpu: 8192`, sized for the no-colocate
 #   layout where each side gets a dedicated GPU. Under --colocate the
 #   sglang engine and Megatron trainer share the same GPU memory budget,
@@ -77,7 +77,7 @@ ROLLOUT_ARGS=(
 NUM_GPUS=2
 
 TRAIN_ARGS=(
-   --config "${SCRIPT_DIR}/config.yaml"
+   --config "${SCRIPT_DIR}/config-colocate.yaml"
    --save-interval 5
    # Per-role rollout/train data dumps land under
    #   <dump-details>/<policy_name>/rollout_data/<rollout_id>.pt
