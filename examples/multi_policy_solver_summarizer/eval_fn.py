@@ -1,28 +1,15 @@
 """Eval for the solver+summarizer chain.
 
-Runs the chain once per AIME prompt and emits per-prompt pass@k
-aggregates (k = 1, 2, 4) for both roles, computed from the raw
-(unscaled) RM rewards via the unbiased pass@k estimator. Pass@k is
-computed inside this function rather than via --log-passrate because
-that global flag also triggers train-side pass-rate logging, whose
-assertion (`len(rewards) == rollout_batch_size * n_samples_per_prompt`)
-does not hold in this multi-agent setup: slime calls the chain
-n_samples_per_prompt times per outer prompt and each call returns
-num_parallel samples per role, so the per-role buffer carries
-n_samples_per_prompt * num_parallel samples per prompt.
+Runs the chain once per prompt and emits per-prompt pass@k (k=1,2,4) for both
+roles from the raw (unscaled) RM rewards. Computed here rather than via
+--log-passrate: that flag's train-side assertion
+(len(rewards) == rollout_batch_size * n_samples_per_prompt) doesn't hold here,
+since the chain runs n_samples_per_prompt times per outer prompt and returns
+num_parallel samples per role.
 
-Emitted metrics (per dataset NAME in eval_config.yaml):
-
-  eval/<NAME>_summarizer_pass1/score   summarizer pass@1
-  eval/<NAME>_summarizer_pass2/score   summarizer pass@2
-  eval/<NAME>_summarizer_pass4/score   summarizer pass@4 (best-of-4)
-  eval/<NAME>_solver_pass1/score       solver pass@1
-  eval/<NAME>_solver_pass2/score       solver pass@2
-  eval/<NAME>_solver_pass4/score       solver pass@4 (best-of-4, skyline)
-
-Headline: `pass4` for both roles. Their difference diagnoses whether
-the summarizer is synthesizing nontrivially or just aggregating (or
-destroying) signal the solver produced.
+Emits eval/<NAME>_{solver,summarizer}_pass{1,2,4}/score (NAME from
+eval_config.yaml). Headline is pass4; the solver-vs-summarizer gap shows
+whether the summarizer synthesizes nontrivially or just aggregates signal.
 """
 
 import asyncio
@@ -66,14 +53,10 @@ def _load_eval_dataset(args: Namespace, dataset_cfg) -> Dataset:
 def eval_with_multi_agents(
     args: Namespace, rollout_id: int, data_source: Any, evaluation: bool = True
 ) -> RolloutFnEvalOutput:
-    """Custom eval function: --eval-function-path points here.
+    """Eval entry point (--eval-function-path). Runs the chain once per prompt
+    for each dataset in args.eval_datasets and emits pass@k (k=1,2,4) per role.
 
-    For each eval dataset listed in args.eval_datasets, runs the chain
-    once per prompt and emits per-prompt pass@k aggregates (k=1,2,4) for
-    both solver and summarizer using the raw RM rewards.
-
-    Mirrors the (sync outer, async inner via run()) shape used by
-    `generate_rollout` in slime.rollout.sglang_rollout.
+    Mirrors the sync-outer/async-inner (via run()) shape of generate_rollout.
     """
     assert evaluation, "eval_with_multi_agents is the eval-only entry point"
     assert not args.group_rm, "Group RM is not supported for eval rollout"
@@ -105,10 +88,8 @@ def _eval_one_dataset(args: Namespace, dataset_cfg) -> dict[str, dict[str, list[
         sample = copy.deepcopy(prompt_sample)
         sample.metadata = dataset_cfg.inject_metadata(getattr(sample, "metadata", None))
         chain = await generate_with_multi_agents(args, sample, sampling_params, evaluation=True)
-        # Return real Sample objects (not just rewards) so we can attach
-        # them to each emitted dataset; _save_debug_rollout_data and
-        # compute_metrics_from_samples both require info["samples"] to
-        # exist and be a non-empty list of Samples.
+        # Return real Samples (not just rewards): _save_debug_rollout_data and
+        # compute_metrics_from_samples need a non-empty info["samples"] list.
         solver = [s for s in chain if s.policy_name == "solver"]
         summarizer = [s for s in chain if s.policy_name == "summarizer"]
         return solver, summarizer
@@ -153,18 +134,14 @@ _PASSK_KS = (1, 2, 4)
 
 
 def _pass_at_k_per_prompt(rewards_per_prompt: list[list[float]], k: int) -> list[float]:
-    """Unbiased pass@k estimator (Chen et al. 2021) computed per prompt.
-
-    For each prompt's n raw 0/1 rewards with c correct,
-      pass@k = 1 - C(n - c, k) / C(n, k)  if (n - c) >= k else 1.
-    """
+    """Unbiased per-prompt pass@k estimator (Chen et al. 2021): for n raw 0/1
+    rewards with c correct, pass@k = 1 - C(n-c, k) / C(n, k) if (n-c) >= k else 1."""
     out = []
     for rewards in rewards_per_prompt:
         n = len(rewards)
         c = sum(1 for r in rewards if r == 1)
         if k > n:
-            # Not enough attempts to evaluate pass@k; skip the prompt.
-            continue
+            continue  # not enough attempts for pass@k
         if n - c < k:
             out.append(1.0)
         else:
@@ -179,12 +156,10 @@ def _pass_at_k_per_prompt(rewards_per_prompt: list[list[float]], k: int) -> list
 def _ds(rewards: list[float], samples: list) -> dict[str, list[Any]]:
     from slime.utils.types import Sample
 
-    # Same `samples` list (real Sample objects) attached to every pass@k
-    # variant per role. _save_debug_rollout_data requires the "samples"
-    # key to exist on every emitted dataset, and compute_metrics_from_samples
-    # crashes on an empty list — so attach the full per-role sample list
-    # rather than slicing/omitting it. The 3x duplication in the debug
-    # dump is acceptable given the small per-eval sample count.
+    # Attach the full per-role sample list to every pass@k variant:
+    # _save_debug_rollout_data requires a "samples" key and
+    # compute_metrics_from_samples crashes on an empty list. The 3x debug-dump
+    # duplication is fine given the small per-eval count.
     return {
         "rewards": rewards,
         "truncated": [s.status == Sample.Status.TRUNCATED for s in samples],

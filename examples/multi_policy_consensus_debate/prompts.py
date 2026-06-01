@@ -1,27 +1,21 @@
-## Prompt templates for the multi-agent debate example.
-##
-## Three templates, derived from the paper's `original_gen.py`:
+## Prompt templates for the multi-agent debate example (from the paper's
+## `original_gen.py`):
 ##   - GENERATOR_INITIAL_TEMPLATE: round-0 independent proposal.
 ##   - generate_summarize_template(N): summarize N other agents' responses.
-##   - GENERATOR_UPDATE_TEMPLATE: produce updated answer using a summary.
+##   - GENERATOR_UPDATE_TEMPLATE: updated answer given a summary.
 ##
-## Brace escape: every literal `{ANSWER}` placeholder uses `{{{{ANSWER}}}}` in
-## the f-string so it survives one f-string evaluation and one `.format()`
-## call without becoming a substitution slot. Lessons from the
-## solver_summarizer KeyError fix.
+## Brace escape: a literal `{ANSWER}` in an f-string needs `{{{{ANSWER}}}}`
+## to survive one f-string eval + one `.format()` (solver_summarizer KeyError).
 
 
-# Round 0 — initial independent proposal. The problem_statement comes in
-# already chat-templated by slime, so we pass it through as-is.
+# Round 0 — proposal. problem_statement is already chat-templated by slime.
 GENERATOR_INITIAL_TEMPLATE = """{problem_statement}"""
 
 
 def generate_summarize_template(num_other_agents: int) -> str:
-    """Build a summarize-subroutine prompt that summarizes `num_other_agents`
-    other-agent responses on the same math problem. The output is consumed
-    by the critic (A^C) in the next debate round. The summarize step is a
-    SUBROUTINE in the paper's Algorithm 1 (A^S role) — its samples are not
-    added to results_dict and not trained on."""
+    """Summarize-subroutine prompt over `num_other_agents` other-agent
+    responses; output feeds the critic (A^C) next round. A^S is a subroutine
+    (Algorithm 1): its samples are not added to results_dict or trained on."""
     sections = []
     for i in range(num_other_agents):
         sections.append(f"#### Agent {i+1} response\n{{solution{i+1}}}\n\n---")
@@ -40,15 +34,11 @@ Do NOT solve the problem yourself. Only summarize the other agents' reasoning.
 """
 
 
-# Round k>=1 — agent updates its previous answer using:
-#   - its own prior-round response (so it can iterate on its own reasoning,
-#     matching the paper's chat-history-based debate structure where each
-#     agent sees its own previous turns)
-#   - a summary of OTHER agents' prior-round responses
-#
-# Regular (non-f) string passed through ONE .format() call → `{ANSWER}` is
-# escaped as `{{ANSWER}}` (two braces). The f-string template in
-# `generate_summarize_template` uses four braces — different escape rules.
+# Round k>=1 — agent updates its answer using its own prior response (so it
+# iterates on its own reasoning, per the paper's chat-history debate) plus a
+# summary of OTHER agents' prior responses.
+# Plain string through ONE .format() → `{ANSWER}` escapes as `{{ANSWER}}`
+# (two braces); the f-string template above uses four — different rules.
 GENERATOR_UPDATE_TEMPLATE = """Original problem:
 
 {problem_statement}

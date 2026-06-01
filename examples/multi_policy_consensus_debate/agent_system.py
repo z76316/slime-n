@@ -1,46 +1,31 @@
-"""Multi-agent debate example aligned with the paper's reward design.
-
-Reference: Subramaniam et al. 2025, "Multiagent Finetuning of Language Models"
-(https://arxiv.org/abs/2501.05707), Algorithm 1.
+"""Multi-agent debate, aligned with Subramaniam et al. 2025
+"Multiagent Finetuning of Language Models" (arxiv 2501.05707), Algorithm 1.
 
 Two trainable policies:
-  - generator (A^G): produces round-0 independent responses.
-  - critic    (A^C): produces round-m≥1 updated responses given a summary
-                     of the OTHER N-1 agents' previous-round responses,
-                     plus the agent's OWN previous-round response (so it
-                     can iterate on its own reasoning).
+  - generator (A^G): round-0 independent responses.
+  - critic    (A^C): round-m≥1 updates, given a summary of the OTHER N-1
+                     agents' prior responses plus the agent's OWN prior
+                     response (so it iterates on its own reasoning).
 
-One non-trained subroutine:
-  - summarize: takes others' responses, returns a short summary text.
-               Routed through the generator's sglang engine; resulting
-               Sample is NOT added to results_dict (paper's A^S is a
-               subroutine, not a separately trained model).
+Non-trained subroutine:
+  - summarize (A^S): summarizes others' responses. Routed through the
+                     generator engine; its Sample is NOT added to
+                     results_dict (subroutine, not a trained policy).
 
-REWARD DESIGN (paper-aligned, Algorithm 1 lines 23-26):
+REWARD (Algorithm 1 lines 23-26): ŷ = majority vote over FINAL critic
+responses (per slot).
+  - Generator: 1 if round-0 boxed answer == ŷ, else 0 (per-sample).
+  - Critic: 1 if agent's FINAL critic response == ŷ, else 0 (trajectory-
+    level; same reward to all of the agent's critic rounds).
+Grading mirrors the paper's parse_answer(...) == parse_answer(answer):
+string equality on extracted boxed answers (stripped). Majority vote is
+used in place of ground truth to stay faithful to the no-ground-truth
+self-improvement premise; the dataset gold label is intentionally ignored.
 
-  ŷ = majority vote over the FINAL critic responses (per slot).
-
-  - Generator reward (per round-0 sample):
-      1 if extracted boxed answer of round-0 = ŷ, else 0.
-  - Critic reward (trajectory-level, per critic sample any round):
-      1 if THIS AGENT's FINAL critic response = ŷ, else 0.
-      Same reward propagates to all critic rounds for that agent.
-
-  Matches the paper's `parse_answer(...) == parse_answer(answer)`
-  comparison — simple string equality on extracted boxed answers (after
-  stripping). The paper uses majority vote because they don't have ground
-  truth; we follow the same scheme to stay faithful to the self-
-  improvement-without-ground-truth premise. The dataset's gold label is
-  intentionally ignored.
-
-AGENT IDENTITY:
-
-  Agents are tracked by `wid` (worker id) stamped onto sample.metadata.
-  This is necessary because asyncio.gather completion order is non-
-  deterministic — relying on `args.results_dict[key][-n:]` order would
-  scramble per-agent pairing across rounds. After each round we sort
-  samples by metadata["wid"] so trajectory_i corresponds to the same
-  logical agent at every round.
+AGENT IDENTITY: agents are tracked by `wid` (worker id) on sample.metadata,
+because asyncio.gather completion order is non-deterministic and would
+otherwise scramble per-agent pairing across rounds. Samples are sorted by
+wid after each round so trajectory_i is the same logical agent every round.
 """
 
 import asyncio
@@ -53,7 +38,7 @@ import traceback
 from collections import Counter
 from copy import deepcopy
 
-from slime.rollout.rm_hub import extract_boxed_answer  # canonical alias used by slime's grader
+from slime.rollout.rm_hub import extract_boxed_answer  # slime's canonical grader
 from slime.rollout.sglang_rollout import get_model_url
 from slime.utils.http_utils import post
 from slime.utils.types import Sample
@@ -83,12 +68,9 @@ def _wrap_user_turn(tokenizer, user_content: str) -> str:
 async def generate_response(args, prompt, key, track: bool = True, wid: int | None = None):
     """Call the sglang engine for `key` ∈ {"generator", "critic"}.
 
-    track=False: same generation but the sample is dropped on the floor.
-    Used for the summarize subroutine — paper's A^S is not trained.
-
-    wid: worker id stamped onto sample.metadata so we can reconstruct
-    per-agent pairing across rounds (asyncio.gather completion order is
-    not deterministic).
+    track=False: sample is discarded (summarize subroutine; A^S not trained).
+    wid: worker id on sample.metadata, for per-agent pairing across rounds
+    (asyncio.gather order is non-deterministic).
     """
     try:
         sampling_params = args.sampling_params
@@ -153,7 +135,7 @@ async def generate_response(args, prompt, key, track: bool = True, wid: int | No
         if track:
             sample.policy_name = key
             sample.index = next(_INNER_SAMPLE_ID)
-            # Stamp wid so the orchestrator can reconstruct per-agent pairing.
+            # Stamp wid for per-agent pairing.
             if wid is not None:
                 if sample.metadata is None:
                     sample.metadata = {}
@@ -199,9 +181,7 @@ class CriticAgent(_Agent):
 
 
 async def summarize_subroutine(args, other_responses: list[str], wid: int = 0) -> str:
-    """Untracked summarization. Routes through the generator engine; sample
-    discarded (paper's A^S is a subroutine, not a trained policy)."""
-    # Filter empty / null responses; if nothing meaningful remains, return "".
+    """Untracked summarize via generator engine; sample discarded (A^S)."""
     cleaned = [_strip_chat_tokens(r) for r in other_responses if r and r.strip()]
     if not cleaned:
         return ""
@@ -240,8 +220,8 @@ async def critic_worker(args, problem_statement, prior_response, summary, wid):
 
 
 def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None = None):
-    """Pad to exactly `target_count`. Last-resort fallback uses `args.sample`
-    so the per-role buffer count invariant holds for GRPO reshape."""
+    """Pad to exactly `target_count` so per-role buffer counts stay constant
+    for GRPO reshape. Last-resort fallback uses `args.sample`."""
     samples = args.results_dict[role]
     if len(samples) >= target_count:
         del samples[target_count:]
@@ -272,7 +252,7 @@ def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None 
             "is_padding_placeholder": True,
             "padding_donor_policy": getattr(donor_pool[0], "policy_name", None),
         }
-        # Don't stamp wid on placeholders — they don't represent any logical agent.
+        # Placeholders are not logical agents: drop any wid.
         if placeholder.metadata is not None and "wid" in placeholder.metadata:
             placeholder.metadata = {k: v for k, v in placeholder.metadata.items() if k != "wid"}
         samples.append(placeholder)
@@ -287,13 +267,9 @@ def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None 
 
 
 def _by_wid(samples: list[Sample], n: int) -> list[Sample | None]:
-    """Sort `samples` into a length-n list where position i = the sample with
-    metadata["wid"] == i. Missing slots are filled with None.
-
-    This recovers per-agent pairing after asyncio.gather: completion order
-    inside `samples` is non-deterministic, so we use the wid stamped by
-    generate_response to map samples back to their logical agent.
-    """
+    """Length-n list with position i = sample whose metadata["wid"] == i
+    (None if missing). Recovers per-agent pairing after non-deterministic
+    asyncio.gather ordering."""
     by_wid: dict[int, Sample] = {}
     for s in samples:
         if s.metadata and "wid" in s.metadata:
@@ -311,14 +287,11 @@ def _normalize_answer(ans: str | None) -> str | None:
 
 
 def _matches(sample: Sample | None, y_hat: str) -> bool:
-    """True iff the LAST `\\boxed{...}` in sample.response matches y_hat after
-    whitespace normalization. Mirrors the paper's
-    `parse_answer(...) == parse_answer(...)` comparison.
-
-    Uses `sample.response` (the full model output) — not `sample.response_content`
-    — because the latter strips the pre-`</think>` portion in Qwen3 thinking
-    mode, and the paper's `last_boxed_only_string` extracts the LAST boxed
-    occurrence anywhere in the text."""
+    """True iff the LAST `\\boxed{...}` in sample.response equals y_hat
+    (whitespace-normalized). Uses `.response` (full output), not
+    `.response_content`: the latter strips the pre-`</think>` portion in
+    Qwen3 thinking mode, but the paper extracts the LAST boxed answer
+    anywhere in the text."""
     if sample is None or not sample.response:
         return False
     extracted = extract_boxed_answer(sample.response)
@@ -326,9 +299,8 @@ def _matches(sample: Sample | None, y_hat: str) -> bool:
 
 
 def _majority_vote(answers: list[str | None]) -> str | None:
-    """ŷ = majority vote over extracted boxed answers. None entries are
-    skipped. Tie-break: random — matches the paper's "if no response
-    secures a majority, one is chosen at random"."""
+    """ŷ = majority vote over boxed answers (None/empty skipped). Ties broken
+    randomly, per the paper."""
     valid = [a for a in answers if a is not None and a.strip() != ""]
     if not valid:
         return None
@@ -342,10 +314,9 @@ def _majority_vote(answers: list[str | None]) -> str | None:
 
 
 async def run_agent_system(args, sample):
-    """One slot of debate. Reward is computed AFTER all rounds finish, by
-    majority-voting on final critic responses (ŷ) and grading each sample
-    against ŷ. Matches the paper's Algorithm 1.
-    """
+    """One debate slot. Reward computed after all rounds: majority-vote ŷ
+    over final critic responses, then grade each sample against ŷ
+    (Algorithm 1)."""
     args = deepcopy(args)
     args.sample = sample
     args.results_dict = {"generator": [], "critic": []}
@@ -357,17 +328,17 @@ async def run_agent_system(args, sample):
     target_gen = n  # 3
     target_critic = n * (rounds - 1)  # 6
 
-    # ---- Round 0: N parallel generators (defer grading) ----
+    # ---- Round 0: N parallel generators (grading deferred) ----
     gen_count_before = len(args.results_dict["generator"])
     r0_tasks = [round0_worker(args, raw_problem, wid) for wid in range(n)]
     await asyncio.gather(*r0_tasks, return_exceptions=True)
     gen_samples_unsorted = args.results_dict["generator"][gen_count_before:]
-    gen_samples_by_wid = _by_wid(gen_samples_unsorted, n)  # [sample_or_None × n]
+    gen_samples_by_wid = _by_wid(gen_samples_unsorted, n)
 
-    # prev_responses[i] = wid-i agent's previous-round response (or "")
+    # prev_responses[i] = agent-i's prior-round response (or "")
     prev_responses = [(s.response_content if s and s.response_content is not None else "") for s in gen_samples_by_wid]
 
-    # If round 0 didn't produce N usable responses, abort the debate.
+    # Abort if round 0 lacks N usable responses.
     if sum(1 for r in prev_responses if r) < n:
         for s in args.results_dict["generator"]:
             s.reward = 0.0
@@ -375,12 +346,12 @@ async def run_agent_system(args, sample):
         _pad_role_buffer(args, "critic", target_critic, donor_role="generator")
         return args.results_dict["generator"] + args.results_dict["critic"]
 
-    # critic_trajectory[i] = list of agent-i's critic samples across rounds m=1..M-1
+    # critic_trajectory[i] = agent-i's critic samples for rounds m=1..M-1
     critic_trajectory: list[list[Sample]] = [[] for _ in range(n)]
 
     # ---- Rounds 1..M-1: summarize + critic ----
     for _round_idx in range(1, rounds):
-        # Summarize: agent-i's summary covers OTHERS' previous-round responses.
+        # Summarize: agent-i sees OTHERS' prior responses.
         summary_tasks = []
         for i in range(n):
             others = [prev_responses[j] for j in range(n) if j != i and prev_responses[j]]
@@ -388,14 +359,14 @@ async def run_agent_system(args, sample):
         summaries = await asyncio.gather(*summary_tasks, return_exceptions=True)
         summaries = [s if isinstance(s, str) else "" for s in summaries]
 
-        # Critic: each agent gets paired summary + its own prior response.
+        # Critic: paired summary + own prior response.
         critic_count_before = len(args.results_dict["critic"])
         critic_tasks = [critic_worker(args, raw_problem, prev_responses[i], summaries[i], wid=i) for i in range(n)]
         await asyncio.gather(*critic_tasks, return_exceptions=True)
         round_critic_unsorted = args.results_dict["critic"][critic_count_before:]
         round_critic_by_wid = _by_wid(round_critic_unsorted, n)
 
-        # Append to per-agent trajectory; stop the debate if too many slots failed.
+        # Append to per-agent trajectory; stop if too many slots failed.
         any_landed = False
         next_prev = [""] * n
         for i in range(n):
@@ -412,15 +383,13 @@ async def run_agent_system(args, sample):
 
         prev_responses = next_prev
         if sum(1 for r in prev_responses if r) < n:
-            # Not enough material for next round; finalize what we have.
+            # Not enough material for next round; finalize.
             break
 
-    # ---- Compute ŷ from FINAL critic responses (per slot) ----
-    # Extract from .response (the full text), not .response_content. The
-    # paper's `last_boxed_only_string` finds the LAST `\boxed{...}` anywhere
-    # in the model's output, which is more robust than slicing the post-
-    # </think> portion (especially for truncated outputs that may not close
-    # the think block).
+    # ---- ŷ from FINAL critic responses (per slot) ----
+    # Extract from .response (full text), not .response_content: the paper's
+    # last-boxed scan is more robust than slicing post-</think>, esp. for
+    # truncated outputs that never close the think block.
     final_critic_responses: list[str | None] = []
     for traj in critic_trajectory:
         if traj and traj[-1].response:
@@ -432,9 +401,8 @@ async def run_agent_system(args, sample):
     y_hat = _majority_vote(final_answers)
 
     if y_hat is None:
-        # No usable final-round answer; no ŷ → no debate-derived signal.
-        # Assign 0 reward to all real samples and pad. Matches paper's
-        # behavior of dropping un-graded trajectories.
+        # No ŷ → no signal: zero all real samples and pad (paper drops
+        # un-graded trajectories).
         for s in args.results_dict["generator"]:
             s.reward = 0.0
         for traj in critic_trajectory:
@@ -444,14 +412,14 @@ async def run_agent_system(args, sample):
         _pad_role_buffer(args, "critic", target_critic, donor_role="generator")
         return args.results_dict["generator"] + args.results_dict["critic"]
 
-    # ---- Generator reward: 1 if y_{1,n} = ŷ (per-sample, by wid) ----
+    # ---- Generator reward: per-sample, 1 if round-0 answer == ŷ ----
     for s in gen_samples_by_wid:
         if s is None:
             continue
         s.reward = 1.0 if _matches(s, y_hat) else 0.0
 
-    # ---- Critic reward: trajectory-level. Agent i's FINAL critic response
-    #      determines the reward for ALL critic samples in agent i's trajectory.
+    # ---- Critic reward: trajectory-level. Agent i's FINAL response sets
+    #      the reward for ALL of its critic samples. ----
     for traj in critic_trajectory:
         if not traj:
             continue

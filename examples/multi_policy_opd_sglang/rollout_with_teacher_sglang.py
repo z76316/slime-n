@@ -33,10 +33,8 @@ async def generate_with_teacher_sglang(args, sample: Sample, sampling_params, ev
     }
     resp = await post(teacher_url, payload)
 
-    # meta_info.input_token_logprobs is a list of [logprob, token_id] pairs
-    # over the full input. Skip index 0 (BOS-like; no preceding context to
-    # score), keep the float at index 0 of each pair, then slice to the
-    # response-only tail.
+    # input_token_logprobs = [logprob, token_id] pairs; skip index 0 (no
+    # preceding context), keep the logprob, then slice to response tail.
     all_logprobs = torch.tensor(
         [item[0] for item in resp["meta_info"]["input_token_logprobs"][1:]],
         dtype=torch.float32,

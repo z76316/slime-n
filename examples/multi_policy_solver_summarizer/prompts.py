@@ -1,15 +1,13 @@
-## Prompt templates for the solver + summarizer example.
+# Prompt templates for the solver + summarizer example.
 
 
 SOLVER_PROMPT_TEMPLATE = """{problem_statement}"""
 
 
 def generate_summarize_template(num_solutions: int) -> str:
-    """Build a summarizer prompt that synthesizes `num_solutions` candidate
-    solutions into one final answer. The summarizer's response is graded
-    directly by the verifiable reward (RLVR — deepscaler boxed-answer
-    matcher), so it MUST end with the standard `Answer: \\boxed{...}`
-    format that deepscaler/dapo-math expect."""
+    """Summarizer prompt that synthesizes `num_solutions` candidates into one
+    answer. Graded by RLVR (deepscaler boxed-answer matcher), so it must end
+    with the `Answer: \\boxed{...}` format deepscaler/dapo-math expect."""
     solution_sections = []
     for i in range(num_solutions):
         solution_sections.append(f"#### Solution {i+1}\n{{solution{i+1}}}\n\n---")

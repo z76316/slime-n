@@ -361,7 +361,7 @@ async def run_agent_system(args, sample: Sample) -> list[Sample]:
     raw_problem = _strip_chat_tokens(sample.prompt)
     n = args.num_parallel
 
-    # Phase 1: orchestrator round-1 (plan)
+    # Phase 1: plan (orchestrator round-1)
     plan_by_chain = await asyncio.gather(
         *[_plan_worker(args, raw_problem, chain_id) for chain_id in range(n)],
         return_exceptions=False,
@@ -372,7 +372,7 @@ async def run_agent_system(args, sample: Sample) -> list[Sample]:
         _pad_role_buffer(args, "subagent", n * NUM_SUBAGENTS, donor_role="orchestrator")
         return args.results_dict["orchestrator"] + args.results_dict["subagent"]
 
-    # Parse plans into dispatch prompts
+    # Parse plans into dispatches
     parse_results: dict[int, PlanParseResult] = {}
     for chain_id, plan_sample in enumerate(plan_by_chain):
         if plan_sample is None:
@@ -383,7 +383,7 @@ async def run_agent_system(args, sample: Sample) -> list[Sample]:
         plan_sample.metadata["plan_missing_tags"] = result.missing_tags
         plan_sample.metadata["plan_duplicate_tags"] = result.duplicate_tags
 
-    # Phase 2: subagent calls (all chains × all approaches in parallel)
+    # Phase 2: subagents (all chains × approaches in parallel)
     subagent_tasks = []
     subagent_keys = []  # (chain_id, approach_index)
     for chain_id, plan_sample in enumerate(plan_by_chain):
@@ -395,14 +395,14 @@ async def run_agent_system(args, sample: Sample) -> list[Sample]:
             subagent_keys.append((chain_id, approach_index))
 
     subagent_results = await asyncio.gather(*subagent_tasks, return_exceptions=False)
-    # Organize: chain_id -> [sample_or_None for each approach]
+    # chain_id -> [sample_or_None per approach]
     subagent_by_chain: dict[int, list[Sample | None]] = {}
     for (chain_id, approach_index), sub_sample in zip(subagent_keys, subagent_results, strict=False):
         if chain_id not in subagent_by_chain:
             subagent_by_chain[chain_id] = [None] * NUM_SUBAGENTS
         subagent_by_chain[chain_id][approach_index] = sub_sample
 
-    # Score subagents individually
+    # Score subagents
     real_subagent_samples = [s for s in subagent_results if s is not None]
     if real_subagent_samples:
         subagent_rewards = await batched_async_rm(args, real_subagent_samples)
@@ -417,7 +417,7 @@ async def run_agent_system(args, sample: Sample) -> list[Sample]:
             s.remove_sample = True
             s.metadata["raw_reward"] = 0.0
 
-    # Phase 3: orchestrator round-2 (synthesis)
+    # Phase 3: synthesis (orchestrator round-2)
     synth_tasks = []
     synth_chain_ids = []
     for chain_id, plan_sample in enumerate(plan_by_chain):
@@ -441,7 +441,7 @@ async def run_agent_system(args, sample: Sample) -> list[Sample]:
             s.reward = r
             s.metadata["raw_reward"] = r
 
-    # Assign orchestrator rewards (chain-outcome)
+    # Plan reward = its chain's synthesis (final) reward
     for chain_id, plan_sample in enumerate(plan_by_chain):
         if plan_sample is None:
             continue

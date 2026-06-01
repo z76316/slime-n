@@ -1,9 +1,8 @@
 """Exam Swarm RL — 8 homogeneous agents take the same exam independently.
 
-Per-trajectory advantage is composed at rollout time as
-  final = α·self_adv + β·swarm_adv + γ·peer_adv  (clipped to ±5)
-and stored as Sample.reward (single float). Slime broadcasts to per-token
-via the GRPO advantage estimator path. Run script must pass
+Per-trajectory advantage composed at rollout time as
+final = α·self_adv + β·swarm_adv + γ·peer_adv (clipped to ±5), stored as
+Sample.reward and broadcast per-token via GRPO. Run with
 --disable-rewards-normalization so slime does not re-normalize.
 """
 
@@ -34,10 +33,9 @@ N_AGENTS = 8
 
 
 class SwarmBaseline:
-    """Running EMA of swarm pass rate g across questions, with warmup
-    (returns 0.0 for the first WARMUP calls so cold-start does not inject
-    a systematic bias) and z-score clipping (bounds runaway when σ_g is
-    very small)."""
+    """EMA of swarm pass rate g. Warmup returns 0.0 for the first WARMUP
+    calls (avoid cold-start bias); z-score clipping bounds runaway when σ_g
+    is tiny."""
 
     WARMUP = 20
 
@@ -60,14 +58,13 @@ class SwarmBaseline:
         self.var = self.m * self.var + (1 - self.m) * (g - self.mean) ** 2
 
 
-# Module-level singleton — persists across run_agent_system calls within
-# the rollout-manager actor process.
+# Singleton — persists across run_agent_system calls in the rollout-manager process.
 _SWARM_BASELINE = SwarmBaseline()
 
 
 def rank_advantage(per_agent_scores: list[list[float]]) -> list[float]:
-    """Per-agent rank, normalized to mean 0 across agents and range [-1, +1].
-    Average-rank tie-breaking keeps the per-question sum exactly 0."""
+    """Per-agent rank normalized to mean 0, range [-1, +1]. Average-rank
+    tie-breaking keeps the per-question sum exactly 0."""
     s = [sum(ks) / len(ks) if ks else 0.0 for ks in per_agent_scores]
     n = len(s)
     if n <= 1:
@@ -101,10 +98,8 @@ def self_advantage_grpo(per_agent_scores: list[list[float]]) -> list[list[float]
 
 
 def self_advantage_adversarial(per_agent_scores: list[list[float]]) -> list[list[float]]:
-    """Adversarial baseline: (c - max_peer_mean_i) / (std_i + ε). Per-agent
-    peer baseline doesn't get cancelled by per-question normalization, so
-    the resulting advantage is non-zero-mean within agent i's K — positive
-    iff agent i beats the swarm leader on this question."""
+    """Adversarial baseline: (c - max_peer_mean_i) / (std_i + ε). Non-zero-mean
+    within agent i's K — positive iff agent i beats the swarm leader."""
     n = len(per_agent_scores)
     means = [(sum(ks) / len(ks) if ks else 0.0) for ks in per_agent_scores]
     out = []
@@ -119,15 +114,14 @@ def self_advantage_adversarial(per_agent_scores: list[list[float]]) -> list[list
     return out
 
 
-# Inner-sample id: K-deepcopies of an outer Sample share its index, which
-# trips slime's get_data_iterator uniqueness assertion. High-offset counter
-# keeps inner indices clear of slime's data_source counter.
+# Unique inner-sample ids: K deepcopies share the outer index, tripping
+# slime's get_data_iterator uniqueness assertion. High offset avoids
+# colliding with slime's data_source counter.
 _INNER_SAMPLE_ID = itertools.count(start=1_000_000_000)
 
 
 async def generate_response(args, prompt: str, agent_name: str) -> Sample | None:
-    """Dispatch one inference call to agent_name's sglang engine. Mirrors
-    solver_summarizer.generate_response."""
+    """One inference call to agent_name's sglang engine."""
     try:
         sampling_params = args.sampling_params
         tokenizer = args.tokenizer
@@ -195,9 +189,8 @@ async def agent_worker(args, prompt: str, agent_name: str, worker_id: int) -> Sa
 
 
 def _pad_agent_buffer(args, agent_name: str, target_count: int, donor_pool=None):
-    """Split-buffer routing requires each policy's per-rollout buffer to
-    equal global_batch_size. Pad with placeholders when an agent's
-    inference fails."""
+    """Split-buffer routing needs each policy's per-rollout buffer to equal
+    global_batch_size; pad with placeholders when an agent's inference fails."""
     samples = args.results_dict[agent_name]
     if len(samples) >= target_count:
         del samples[target_count:]
@@ -218,12 +211,9 @@ def _pad_agent_buffer(args, agent_name: str, target_count: int, donor_pool=None)
 
 
 async def run_agent_system(args, sample: Sample) -> list[Sample]:
-    """Per outer prompt: dispatch to all N agents in parallel (K each),
-    score by RLVR, compose 3-channel per-trajectory advantage, return
-    flat list tagged for split-buffer routing.
-
-    args.num_parallel = K (samples per agent for GRPO group-norm).
-    Returns N_AGENTS × K samples.
+    """Per outer prompt: fan out to all N agents (K each), RLVR-score,
+    compose 3-channel advantage, return flat list tagged for split-buffer
+    routing. args.num_parallel = K. Returns N_AGENTS × K samples.
     """
     args = deepcopy(args)
     args.sample = sample

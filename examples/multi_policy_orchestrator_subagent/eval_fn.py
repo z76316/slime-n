@@ -106,17 +106,17 @@ def _eval_one_dataset(args: Namespace, dataset_cfg) -> dict[str, dict[str, list[
         round2_samples_flat.extend(round2)
         subagent_samples_flat.extend(subagent)
 
-        # final_pass@k: based on round-2 (synthesis) rewards
+        # final_pass@k: round-2 (synthesis) rewards
         r2_rewards = [_raw_reward(s) for s in round2 if not _is_placeholder(s)]
         if r2_rewards:
             final_rewards_per_prompt.append(r2_rewards)
 
-        # subagent_pass@k: pooled across all subagent answers
+        # subagent_pass@k: pooled over all subagent answers
         sub_rewards = [_raw_reward(s) for s in subagent if not _is_placeholder(s)]
         if sub_rewards:
             subagent_rewards_per_prompt.append(sub_rewards)
 
-        # best_subagent_pass@k: per chain, correct if any of 3 subagents correct
+        # best_subagent_pass@k: per chain, correct if any subagent correct
         by_chain_sub: dict[int, list[float]] = {}
         for s in subagent:
             if _is_placeholder(s):
@@ -128,7 +128,7 @@ def _eval_one_dataset(args: Namespace, dataset_cfg) -> dict[str, dict[str, list[
         if best_per_chain:
             best_subagent_rewards_per_prompt.append(best_per_chain)
 
-        # synthesis_lift: RM(final) - max(RM(subagents)) per chain
+        # synthesis_lift per chain: RM(final) - max(RM(subagents))
         by_chain_r2 = {
             _chain_id(s): _raw_reward(s) for s in round2 if not _is_placeholder(s) and _chain_id(s) is not None
         }
@@ -137,13 +137,13 @@ def _eval_one_dataset(args: Namespace, dataset_cfg) -> dict[str, dict[str, list[
             if sub_rs:
                 synthesis_lift.append(final_r - max(sub_rs))
 
-        # plan_parse_failure_rate
+        # plan_parse_failure_rate (round-1)
         for s in round1:
             if _is_placeholder(s):
                 continue
             plan_parse_failure.append(1.0 if (s.metadata or {}).get("plan_parse_failed") else 0.0)
 
-        # subagent_answer_agreement: per chain, check if all 3 extracted answers match
+        # subagent_answer_agreement: per chain, do all boxed answers match
         by_chain_answers: dict[int, list[str]] = {}
         for s in subagent:
             if _is_placeholder(s):

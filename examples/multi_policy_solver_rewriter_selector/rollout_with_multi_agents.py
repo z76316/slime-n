@@ -8,7 +8,7 @@ from slime.utils.types import Sample
 
 MULTI_AGENT_CONFIGS = {
     "custom_multi_agent_function_path": "examples.multi_policy_solver_rewriter_selector.agent_system.run_agent_system",
-    # Must match n_samples_per_prompt in config.yaml for GRPO group-norm.
+    # Must match n_samples_per_prompt in config.yaml (GRPO group-norm).
     "num_parallel": 4,
     "incorrect_reward_weight": 0.8,
     "correct_reward_weight": 1.2,

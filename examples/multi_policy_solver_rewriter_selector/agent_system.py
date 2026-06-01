@@ -14,13 +14,12 @@ from .prompts import SOLVER_PROMPT_TEMPLATE, generate_rewriter_template, generat
 
 logger = logging.getLogger(__name__)
 
-# Unique index for inner samples; siblings would otherwise share the outer
-# prompt's index and trip get_data_iterator's uniqueness assertion.
+# Unique index for inner samples; siblings share the outer prompt's index,
+# which trips get_data_iterator's uniqueness assertion.
 _INNER_SAMPLE_ID = itertools.count(start=1_000_000_000)
 
 
-# Strip chat-control tokens so chat text can be embedded in another prompt
-# without nesting chat structures.
+# Strip chat-control tokens so chat text can embed in another prompt without nesting.
 _CHAT_TOKEN_RE = re.compile(r"<\|im_(?:start|end)\|>(?:user|assistant|system)?\s*")
 
 
@@ -46,7 +45,7 @@ async def generate_response(args, prompt, key):
         max_context_length = args.rollout_max_context_len
         sample = deepcopy(args.sample)
 
-        # Route to the sglang engine paired with this role (key matches --sglang-config).
+        # Route to this role's sglang engine (key matches --sglang-config).
         url = get_model_url(args, key)
 
         sample.prompt = prompt
@@ -74,11 +73,11 @@ async def generate_response(args, prompt, key):
         if not new_response_tokens:
             return None
 
-        # Append tokens directly, avoiding re-tokenization.
+        # Append tokens directly to avoid re-tokenization.
         sample.tokens = sample.tokens + new_response_tokens
         sample.response_length += len(new_response_tokens)
         sample.response = output["text"]
-        # Keep per-token logprobs for train-side train_rollout_logprob_abs_diff / tis_*.
+        # Per-token logprobs for train-side train_rollout_logprob_abs_diff / tis_*.
         if sample.rollout_log_probs is None:
             sample.rollout_log_probs = []
         sample.rollout_log_probs += new_response_log_probs
@@ -91,8 +90,8 @@ async def generate_response(args, prompt, key):
             case "stop":
                 sample.status = Sample.Status.COMPLETED
 
-        # Tag for buffer routing and give a unique index (the deepcopy inherits
-        # the outer prompt's index, which would collide across siblings).
+        # Tag for buffer routing; unique index (deepcopy inherits the outer
+        # index, which collides across siblings).
         sample.policy_name = key
         sample.index = next(_INNER_SAMPLE_ID)
         args.results_dict[key].append(sample)
@@ -157,13 +156,13 @@ class RewriterAgent(Agent):
         """Generate the rewritten solution."""
         template = generate_rewriter_template(len(previous_solutions))
 
-        # problem_statement is raw; strip stray chat tokens from model-output solutions.
+        # problem is raw; strip chat tokens from model-output solutions.
         format_params = {"problem_statement": problem_statement}
         for i, solution in enumerate(previous_solutions):
             format_params[f"solution{i+1}"] = _strip_chat_tokens(solution)
 
         body = template.format(**format_params)
-        prompt = _wrap_user_turn(args.tokenizer, body)  # wrap as a user turn
+        prompt = _wrap_user_turn(args.tokenizer, body)
         return await self.run(args, prompt, max_retries=1, key="rewriter")
 
 
@@ -177,7 +176,7 @@ class SelectorAgent(Agent):
         """Generate the selector judgment."""
         template = generate_select_template(len(candidate_solutions))
 
-        # problem_statement is raw; solutions are stripped of chat tokens too.
+        # problem is raw; strip chat tokens from solutions.
         format_params = {"problem_statement": problem_statement}
         for i, solution in enumerate(candidate_solutions):
             format_params[f"solution{i+1}"] = _strip_chat_tokens(solution)
@@ -223,7 +222,7 @@ async def solver_worker(args, problem_statement, worker_id):
 
 
 async def select_worker(args, problem_statement, candidate_solutions, worker_id):
-    """Run one selector; num_parallel run in parallel to give GRPO its group per problem."""
+    """Run one selector; num_parallel run in parallel for GRPO's per-problem group."""
     try:
         selector = SelectorAgent()
         response = await selector.select(args, problem_statement, candidate_solutions)
@@ -238,9 +237,9 @@ def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None 
     """Top up `args.results_dict[role]` to exactly `target_count` samples.
 
     Split-buffer routing needs each role's per-rollout buffer to match
-    global_batch_size; a short buffer trips data.py's num_local_samples assert.
-    Pad with zero-response placeholders so failed phases don't leak donor
-    tokens/logprobs into another policy's buffer.
+    global_batch_size (else data.py's num_local_samples assert fails). Pad with
+    zero-response placeholders so failed phases don't leak donor tokens/logprobs
+    into another policy's buffer.
     """
     samples = args.results_dict[role]
     if len(samples) >= target_count:
@@ -295,7 +294,7 @@ def _pad_role_buffer(args, role: str, target_count: int, donor_role: str | None 
         placeholder.response_content = None
         placeholder.reason_content = None
         placeholder.tokens = prompt_tokens
-        # train_data checks the first sample only; match the buffer's logprob presence.
+        # train_data checks only the first sample; match buffer's logprob presence.
         placeholder.rollout_log_probs = [] if role_has_logprobs else None
         placeholder.rollout_routed_experts = None
         placeholder.teacher_log_probs = None
@@ -308,8 +307,8 @@ async def run_agent_system(args, sample):
     args.sample = sample
     args.results_dict = {"solver": [], "rewriter": [], "selector": []}
 
-    # Solver uses the chat-formatted prompt directly; rewriter/selector embed the
-    # RAW problem in their own template to avoid nested chat structures.
+    # Solver uses the chat-formatted prompt; rewriter/selector embed the RAW
+    # problem in their own template to avoid nested chat structures.
     solver_prompt = sample.prompt
     raw_problem = _strip_chat_tokens(sample.prompt)
     tasks = [solver_worker(args, solver_prompt, worker_id) for worker_id in range(args.num_parallel)]
@@ -330,19 +329,19 @@ async def run_agent_system(args, sample):
 
     if len(previous_solutions) == 0:
         reward_adjustment(args.results_dict["solver"], args.incorrect_reward_weight)
-        # Pad all roles to equal per-rollout counts (get_data_iterator asserts this).
+        # Pad all roles to equal per-rollout counts (get_data_iterator asserts).
         _pad_role_buffer(args, "solver", n)
         _pad_role_buffer(args, "rewriter", n, donor_role="solver")
         _pad_role_buffer(args, "selector", n, donor_role="solver")
         return args.results_dict["solver"] + args.results_dict["rewriter"] + args.results_dict["selector"]
 
-    # Rewriting — feed the raw problem so solver chat tokens don't leak through.
+    # Rewrite phase — feed raw problem so solver chat tokens don't leak through.
     tasks = [
         rewrite_worker(args, previous_solutions, raw_problem, worker_id) for worker_id in range(args.num_parallel)
     ]
     rewrited_solutions_raw = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Keep only valid rewritten solutions.
+    # Keep only valid rewrites.
     rewrited_solutions = []
     for _i, result in enumerate(rewrited_solutions_raw):
         if isinstance(result, str):
@@ -360,8 +359,8 @@ async def run_agent_system(args, sample):
         _pad_role_buffer(args, "selector", n, donor_role="solver")
         return args.results_dict["solver"] + args.results_dict["rewriter"] + args.results_dict["selector"]
 
-    # Selection — num_parallel selectors for GRPO group-norm; selector gets the
-    # raw problem and chat-templates it itself.
+    # Select phase — num_parallel selectors for GRPO group-norm; selector gets
+    # the raw problem and chat-templates it itself.
     selector = SelectorAgent()  # for extract_selected_solution_idx
     tasks = [select_worker(args, raw_problem, rewrited_solutions, worker_id) for worker_id in range(args.num_parallel)]
     await asyncio.gather(*tasks, return_exceptions=True)
@@ -375,8 +374,8 @@ async def run_agent_system(args, sample):
         return args.results_dict["solver"] + args.results_dict["rewriter"] + args.results_dict["selector"]
 
     # Reward each selector by the rewriter solution it picked (matched via
-    # response_content, so order is irrelevant). Unparseable judgments are
-    # excluded from mean_selector_reward to avoid anti-training correct upstream.
+    # response_content, order-independent). Unparseable judgments are excluded
+    # from mean_selector_reward to avoid anti-training correct upstream.
     parsed_selector_rewards: list[float] = []
     for sel_sample in args.results_dict["selector"]:
         response = sel_sample.response_content
@@ -396,7 +395,7 @@ async def run_agent_system(args, sample):
         parsed_selector_rewards.append(sel_sample.reward)
 
     # Group shaping: bonus all roles if mean selector reward is high, else penalize.
-    # If no selector parsed, leave raw rewards (no judgment signal — don't anti-train).
+    # No parsed selector => no judgment signal, leave raw rewards (don't anti-train).
     if not parsed_selector_rewards:
         _pad_role_buffer(args, "solver", n)
         _pad_role_buffer(args, "rewriter", n, donor_role="solver")

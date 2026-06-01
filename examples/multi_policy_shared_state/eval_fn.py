@@ -16,7 +16,7 @@ from .rollout_with_shared_state import generate_with_shared_state
 
 _EVAL_DATASET_CACHE: dict[Any, Dataset] = {}
 _PASSK_KS = (1, 2, 4)
-_BOXED_RE = re.compile(r"\\boxed\{")  # sentinel for _extract_boxed
+_BOXED_RE = re.compile(r"\\boxed\{")
 
 
 def _load_eval_dataset(args: Namespace, dataset_cfg) -> Dataset:
@@ -122,36 +122,34 @@ def _eval_one_dataset(args: Namespace, dataset_cfg) -> dict[str, dict[str, list[
         a_by_chain = _group_by_chain(peer_a)
         b_by_chain = _group_by_chain(peer_b)
 
-        # peer_a round-3 pass@k
+        # round-3 pass@k per peer
         a_r3 = [_raw_reward(s) for s in a_by_round.get(3, [])]
         if a_r3:
             peer_a_r3_rewards_pp.append(a_r3)
 
-        # peer_b round-3 pass@k
         b_r3 = [_raw_reward(s) for s in b_by_round.get(3, [])]
         if b_r3:
             peer_b_r3_rewards_pp.append(b_r3)
 
-        # pooled round-1 pass@k (direct RM reward, not chain-outcome)
+        # pooled round-1/2 pass@k: direct RM reward, not chain-outcome
         r1_pool = [_direct_reward(s) for s in a_by_round.get(1, [])] + [
             _direct_reward(s) for s in b_by_round.get(1, [])
         ]
         if r1_pool:
             round1_pooled_pp.append(r1_pool)
 
-        # pooled round-2 pass@k (direct RM reward, not chain-outcome)
         r2_pool = [_direct_reward(s) for s in a_by_round.get(2, [])] + [
             _direct_reward(s) for s in b_by_round.get(2, [])
         ]
         if r2_pool:
             round2_pooled_pp.append(r2_pool)
 
-        # combined round-3 pass@k (both peers pooled)
+        # round-3 pass@k, both peers pooled
         combined = a_r3 + b_r3
         if combined:
             combined_r3_pp.append(combined)
 
-        # Per-chain lifts for peer_a (direct RM reward per round)
+        # Per-chain lifts, direct RM reward per round
         for chain_samples in a_by_chain.values():
             rds = {(s.metadata or {}).get("round_number"): _direct_reward(s) for s in chain_samples}
             if 1 in rds and 2 in rds:
@@ -161,7 +159,6 @@ def _eval_one_dataset(args: Namespace, dataset_cfg) -> dict[str, dict[str, list[
             if 1 in rds and 3 in rds:
                 total_lift_a.append(rds[3] - rds[1])
 
-        # Per-chain lifts for peer_b (direct RM reward per round)
         for chain_samples in b_by_chain.values():
             rds = {(s.metadata or {}).get("round_number"): _direct_reward(s) for s in chain_samples}
             if 1 in rds and 2 in rds:

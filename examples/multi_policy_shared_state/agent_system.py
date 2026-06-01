@@ -298,7 +298,7 @@ async def run_agent_system(args, sample: Sample) -> list[Sample]:
     raw_problem = _strip_chat_tokens(sample.prompt)
     n = args.num_parallel
 
-    # Phase 1: round-1 (parallel, both peers independently solve)
+    # Phase 1: round-1, both peers solve independently
     r1_tasks = []
     for chain_id in range(n):
         r1_tasks.append(_round1_worker(args, raw_problem, "peer_a", chain_id))
@@ -323,7 +323,7 @@ async def run_agent_system(args, sample: Sample) -> list[Sample]:
         _pad_role_buffer(args, "peer_b", 3 * n)
         return args.results_dict["peer_a"] + args.results_dict["peer_b"]
 
-    # Phase 2: round-2 (parallel, both peers see shared state v1)
+    # Phase 2: round-2, both peers see shared state v1
     r2_tasks = []
     r2_keys = []
     for chain_id in range(n):
@@ -354,7 +354,7 @@ async def run_agent_system(args, sample: Sample) -> list[Sample]:
             s.reward = r
             s.metadata["raw_reward"] = r
 
-    # Phase 3: round-3 (parallel, both peers see shared state v2)
+    # Phase 3: round-3, both peers see shared state v2
     r3_tasks = []
     r3_keys = []
     for chain_id in range(n):
@@ -389,14 +389,12 @@ async def run_agent_system(args, sample: Sample) -> list[Sample]:
             s.reward = r
             s.metadata["raw_reward"] = r
 
-    # Preserve direct RM rewards before chain-outcome overwrite. Eval reads
-    # "direct_raw_reward" for per-round lift metrics; training reads
-    # "raw_reward" (chain-outcome) for GRPO advantages.
+    # Snapshot direct RM reward before chain-outcome overwrite: eval uses
+    # "direct_raw_reward" for per-round lift; training uses "raw_reward".
     for s in r1_real + r2_real:
         s.metadata["direct_raw_reward"] = s.metadata.get("raw_reward", 0.0)
 
-    # Chain-outcome reward: round-1 and round-2 get their peer's round-3 reward.
-    # If round-3 failed (infra), mark earlier rounds remove_sample=True.
+    # Chain-outcome: round-1/2 inherit round-3 reward; if round-3 failed, drop them.
     for chain_id in range(n):
         r3_a = r3_a_by_chain.get(chain_id)
         if r3_a is not None and "raw_reward" in (r3_a.metadata or {}):
@@ -432,7 +430,7 @@ async def run_agent_system(args, sample: Sample) -> list[Sample]:
                 prior.remove_sample = True
                 prior.metadata["raw_reward"] = 0.0
 
-    # Pad buffers to target counts (3 rounds x num_parallel = 12 per peer)
+    # Pad each peer buffer to 3 rounds x num_parallel = 12
     _pad_role_buffer(args, "peer_a", 3 * n)
     _pad_role_buffer(args, "peer_b", 3 * n)
 

@@ -7,11 +7,9 @@ from slime.utils.types import Sample
 
 MULTI_AGENT_CONFIGS = {
     "custom_multi_agent_function_path": "examples.multi_policy_consensus_debate.agent_system.run_agent_system",
-    # num_parallel = paper's `agents`. Counterfactual reward needs ≥ 3 to
-    # avoid the degenerate summarize-1-response case (see plan §1).
+    # paper's `agents`; needs ≥ 3 to avoid the degenerate summarize-1 case.
     "num_parallel": 3,
-    # rounds = paper's `rounds`. Round 0 = propose; rounds 1..R-1 = summarize
-    # + update. With 3 rounds we get one full iterated debate cycle.
+    # paper's `rounds`: round 0 = propose, rounds 1..R-1 = summarize + update.
     "rounds": 3,
 }
 
