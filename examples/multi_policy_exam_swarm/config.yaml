@@ -35,7 +35,7 @@ _megatron_defaults: &megatron_defaults
   micro_batch_size: 1
   global_batch_size: 64
   use_dynamic_batch_size: true
-  max_tokens_per_gpu: 18432         # ~18k, room for 16k response + ~2k prompt in one microbatch
+  max_tokens_per_gpu: 32768         # fits a full 32768-token sequence in one microbatch
 
   optimizer: adam
   lr: 1.0e-6
@@ -59,9 +59,9 @@ _sglang_defaults: &sglang_defaults
   update_weights: true
   num_gpus_per_engine: 1
   mem_fraction_static: 0.3          # leave room for colocated Megatron during train phase
-  cuda_graph_bs: [1, 2, 4, 8, 16, 32]
+  # cuda_graph_bs: [1, 2, 4, 8, 16, 32]
   chunked_prefill_size: 4096
-  max_running_requests: 32
+  max_running_requests: 512
   log_level: info
   server_groups:
     - worker_type: regular

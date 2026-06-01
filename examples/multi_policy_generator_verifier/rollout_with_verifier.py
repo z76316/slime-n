@@ -38,5 +38,11 @@ async def generate_with_verifier(args, sample: Sample, sampling_params, evaluati
     custom_multi_agent_func = load_function(local_args.custom_multi_agent_function_path)
     samples = await custom_multi_agent_func(local_args, sample)
 
+    # Share the prompt's group id across all siblings (rollout validator
+    # requires it; each policy's n_samples_per_prompt then form one GRPO group).
+    group_id = sample.group_id if sample.group_id is not None else sample.index
+    for s in samples:
+        s.group_id = group_id
+
     random.shuffle(samples)
     return samples

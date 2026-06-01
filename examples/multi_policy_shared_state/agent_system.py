@@ -41,9 +41,14 @@ def _split_reason_response(text: str) -> tuple[str | None, str]:
 
 
 def _visible_response(sample: Sample | None) -> str:
+    """Visible text the shared state carries forward: the answer only, never the
+    model's <think>...</think> reasoning."""
     if sample is None:
         return ""
-    return (sample.response_content or _strip_chat_tokens(sample.response)).strip()
+    if sample.response_content:
+        return sample.response_content.strip()
+    # Fallback strips reasoning too (don't leak the raw <think> response).
+    return _split_reason_response(sample.response)[1].strip()
 
 
 async def generate_response(args, prompt: str, key: str) -> Sample | None:

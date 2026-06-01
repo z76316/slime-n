@@ -1,31 +1,24 @@
 #!/bin/bash
 
-# Colocate variant of run-qwen3-0.6B-solver-summarizer.sh.
+# Colocate variant of run-qwen3-0.6B-solver-summarizer-nocolocate.sh.
 #
 # Same example, same task, same policies (solver + summarizer). The only
 # difference is `--colocate`: each policy's Megatron actor and SGLang
 # engine share GPUs via fractional Ray resources, with offload/onload
 # swapping between train and rollout phases.
 #
-# Cluster sizing (with --colocate):
-#   actor_gpus   = sum(megatron_num_nodes * num_gpus_per_node) = 2 × 1 × 1 = 2
-#   rollout_gpus = sum(sglang_num_nodes   * num_gpus_per_node) = 2 × 1 × 1 = 2
-#   total        = max(actor_gpus, rollout_gpus)               = 2
-# Layout: GPU 0 hosts solver  (Megatron + SGLang share via offload)
-#         GPU 1 hosts summarizer (Megatron + SGLang share via offload)
+# Cluster sizing (with --colocate), tuned for a single 8xH200 node:
+#   actor_gpus   = sum(megatron_num_nodes * num_gpus_per_node) = 2 × 1 × 4 = 8
+#   rollout_gpus = sum(sglang_num_nodes   * num_gpus_per_node) = 2 × 1 × 4 = 8
+#   total        = max(actor_gpus, rollout_gpus)               = 8
+# Layout: GPUs 0-3 host solver     (TP-2×DP-2 Megatron + 4 SGLang engines, timeshared)
+#         GPUs 4-7 host summarizer (TP-2×DP-2 Megatron + 4 SGLang engines, timeshared)
 #
-# 2 GPUs vs the 4 GPUs of the no-colocate variant.
-#
-# IMPORTANT — config.yaml memory tuning:
-#   The default config.yaml has `sglang.mem_fraction_static: 0.85` and
-#   `megatron.max_tokens_per_gpu: 8192`, sized for the no-colocate
-#   layout where each side gets a dedicated GPU. Under --colocate the
-#   sglang engine and Megatron trainer share the same GPU memory budget,
-#   so you'll need to lower at least one of:
-#     - sglang.mem_fraction_static  → 0.2-0.3 (matches multi_policy_solver_rewriter_selector)
-#     - megatron.max_tokens_per_gpu → 2048
-#     - megatron.mem_fraction_static handled by torch_memory_saver
-#   Otherwise expect colocate-mode OOM during the train forward pass.
+# H200 tuning lives in config-colocate.yaml: mem_fraction_static 0.5 (sglang and
+# the trainer timeshare each policy's 4 GPUs — sglang is paused during the train
+# step, the trainer is offloaded during rollout, so 0.5 is safe on 141GB),
+# max_tokens_per_gpu 32768 (fits a full-context sample + better packing),
+# max_running_requests 256 and cuda_graph_bs up to 64 for the wider rollout.
 
 # for rerun the task
 pkill -9 sglang
@@ -69,15 +62,15 @@ ROLLOUT_ARGS=(
    --rollout-batch-size 32
    --disable-rollout-trim-samples
    --rollout-max-context-len 32768
-   --rollout-max-response-len 16384
+   --rollout-max-response-len 32768
    --rollout-temperature 1
    --balance-data
 )
 
-NUM_GPUS=2
+NUM_GPUS=8
 
 TRAIN_ARGS=(
-   --config "${SCRIPT_DIR}/config.yaml"
+   --config "${SCRIPT_DIR}/config-colocate.yaml"
    --save-interval 5
    # Per-role rollout/train data dumps land under
    #   <dump-details>/<policy_name>/rollout_data/<rollout_id>.pt
@@ -97,7 +90,7 @@ EVAL_ARGS=(
    --eval-interval 2
    --eval-config "${SCRIPT_DIR}/eval_config.yaml"
    --eval-function-path examples.multi_policy_solver_summarizer.eval_fn.eval_with_multi_agents
-   --eval-max-response-len 16384
+   --eval-max-response-len 32768
    --eval-top-p 1
 )
 

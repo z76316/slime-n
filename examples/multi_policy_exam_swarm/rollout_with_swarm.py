@@ -31,5 +31,11 @@ async def generate_with_swarm(args, sample: Sample, sampling_params, evaluation:
     custom_fn = load_function(args.custom_multi_agent_function_path)
     samples = await custom_fn(args, sample)
 
+    # Share the prompt's group id across all siblings (rollout validator
+    # requires it; each policy's n_samples_per_prompt then form one GRPO group).
+    group_id = sample.group_id if sample.group_id is not None else sample.index
+    for s in samples:
+        s.group_id = group_id
+
     random.shuffle(samples)
     return samples

@@ -42,7 +42,7 @@ ROLLOUT_ARGS=(
    --rollout-batch-size 32
    --disable-rollout-trim-samples
    --rollout-max-context-len 32768
-   --rollout-max-response-len 16384
+   --rollout-max-response-len 32768
    --rollout-temperature 1
    --balance-data
 )
@@ -51,13 +51,14 @@ ROLLOUT_ARGS=(
 
 # Cluster sizing — derived from config.yaml (NO colocate):
 #   actor_gpus   = sum(megatron_num_nodes * num_gpus_per_node) = 2 × 1 × 1 = 2
-#   rollout_gpus = sum(sglang_num_nodes   * num_gpus_per_node) = 2 × 1 × 1 = 2
-#   total        = actor_gpus + rollout_gpus                   = 4
-# Layout: GPUs 0,1 = solver+summarizer Megatron actors; GPUs 2,3 = sglang engines.
-NUM_GPUS=4
+#   rollout_gpus = sum(sglang_num_nodes   * num_gpus_per_node) = 2 × 3 × 1 = 6
+#   total        = actor_gpus + rollout_gpus                   = 8
+# Layout (8×H200): GPUs 0,1 = solver+summarizer Megatron actors;
+#   GPUs 2-4 = 3 solver sglang engines; GPUs 5-7 = 3 summarizer sglang engines.
+NUM_GPUS=8
 
 TRAIN_ARGS=(
-   --config "${SCRIPT_DIR}/config.yaml"
+   --config "${SCRIPT_DIR}/config-nocolocate.yaml"
    --save-interval 5
    # Per-role rollout/train data dumps land under
    #   <dump-details>/<policy_name>/rollout_data/<rollout_id>.pt
@@ -78,7 +79,7 @@ EVAL_ARGS=(
    --eval-interval 2
    --eval-config "${SCRIPT_DIR}/eval_config.yaml"
    --eval-function-path examples.multi_policy_solver_summarizer.eval_fn.eval_with_multi_agents
-   --eval-max-response-len 16384
+   --eval-max-response-len 32768
    --eval-top-p 1
 )
 

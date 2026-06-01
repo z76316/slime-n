@@ -41,8 +41,8 @@ ROLLOUT_ARGS=(
    --num-rollout 3000
    --rollout-batch-size 32
    --disable-rollout-trim-samples
-   --rollout-max-context-len 16384
-   --rollout-max-response-len 4096
+   --rollout-max-context-len 32768
+   --rollout-max-response-len 32768
    --rollout-temperature 1
    --balance-data
 )
@@ -68,7 +68,7 @@ TRAIN_ARGS=(
 
 EVAL_ARGS=(
    --n-samples-per-eval-prompt 16
-   --eval-max-response-len 4096
+   --eval-max-response-len 32768
    --eval-top-p 1
 )
 

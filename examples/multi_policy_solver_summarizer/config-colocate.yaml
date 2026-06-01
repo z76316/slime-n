@@ -1,23 +1,102 @@
-# Orchestrator + subagent on DAPO-math-17k. Two trainable paired policies.
-# Cluster: 4 GPUs no-colocate (2 Megatron actors + 2 sglang engines).
+# Solver + summarizer on DAPO-math-17k. Two trainable paired policies.
+# Cluster: 8 GPUs with --colocate (max(8 Megatron, 8 sglang); each policy gets
+# a 4-GPU slice where its actor and engines timeshare). Used by -colocate launch.
+# See README for the pipeline / reward shape.
 
 policies:
 
-  - name: orchestrator
+  # ─── solver ───────────────────────────────────────────────────────────────
+  - name: solver
     role: actor
 
     hf_checkpoint: /root/Qwen3-0.6B
-    save: /ckpt/multi_policy_orchestrator_subagent/qwen3-0.6b/orchestrator
+    save: /ckpt/multi_policy_solver_summarizer/qwen3-0.6b/solver
+    # ref_load: /ckpt/qwen3-0.6b-torch-dist   # uncomment to resume from torch_dist
 
     buffer_mode: split
 
-    num_gpus_per_node: 1
+    num_gpus_per_node: 4        # 8xH200: 4 GPUs/policy (DP-4 train + 4 sglang engines, timeshared)
     megatron_num_nodes: 1
     sglang_num_nodes: 1
 
     megatron:
       megatron_to_hf_mode: bridge
-      tensor_model_parallel_size: 1
+      tensor_model_parallel_size: 2        # shard vocab-parallel logits across 2 GPUs to bound the 32768-token CE peak
+      pipeline_model_parallel_size: 1
+      context_parallel_size: 1
+      expert_model_parallel_size: 1
+      expert_tensor_parallel_size: 1
+
+      recompute_granularity: full
+      recompute_method: uniform
+      recompute_num_layers: 1
+
+      # RL-correctness defaults (zero dropout, fp32 reductions/softmax)
+      attention_dropout: 0.0
+      hidden_dropout: 0.0
+      accumulate_allreduce_grads_in_fp32: true
+      attention_softmax_in_fp32: true
+
+      log_probs_chunk_size: 512
+
+      micro_batch_size: 1
+      global_batch_size: 128
+      use_dynamic_batch_size: true
+      max_tokens_per_gpu: 32768
+
+      optimizer: adam
+      lr: 1.0e-6
+      lr_decay_style: constant
+      weight_decay: 0.1
+      adam_beta1: 0.9
+      adam_beta2: 0.98
+      optimizer_cpu_offload: true
+      overlap_cpu_optimizer_d2h_h2d: true
+      use_precision_aware_optimizer: true
+
+      advantage_estimator: grpo
+      n_samples_per_prompt: 4
+      eps_clip: 0.2
+      eps_clip_high: 0.28
+      kl_coef: 0
+      use_kl_loss: false
+      kl_loss_coef: 0
+
+    sglang:
+      update_weights: true
+      num_gpus_per_engine: 1
+
+      # Colocate: sglang and the trainer timeshare each policy's 4 GPUs
+      # (torch_memory_saver pauses sglang during the train step; the trainer
+      # is offloaded during rollout). They don't peak together, so 0.8 is
+      # safe on H200 (141GB) — the 0.6B Megatron weights fit the remainder.
+      mem_fraction_static: 0.8
+      # cuda_graph_bs: [1, 2, 4, 8, 16, 32, 64]
+      chunked_prefill_size: 4096
+      max_running_requests: 512
+      # max_total_tokens: 131072
+      log_level: info
+
+      server_groups:
+        - worker_type: regular
+          num_gpus: 4        # = sglang_num_nodes(1) × num_gpus_per_node(4); 4 DP engines
+
+  # ─── summarizer ───────────────────────────────────────────────────────────
+  - name: summarizer
+    role: actor
+
+    hf_checkpoint: /root/Qwen3-0.6B
+    save: /ckpt/multi_policy_solver_summarizer/qwen3-0.6b/summarizer
+
+    buffer_mode: split
+
+    num_gpus_per_node: 4        # 8xH200: 4 GPUs/policy (DP-4 train + 4 sglang engines, timeshared)
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+
+    megatron:
+      megatron_to_hf_mode: bridge
+      tensor_model_parallel_size: 2        # shard vocab-parallel logits across 2 GPUs to bound the 32768-token CE peak
       pipeline_model_parallel_size: 1
       context_parallel_size: 1
       expert_model_parallel_size: 1
@@ -50,7 +129,7 @@ policies:
       use_precision_aware_optimizer: true
 
       advantage_estimator: grpo
-      n_samples_per_prompt: 8
+      n_samples_per_prompt: 4     # matches num_parallel in rollout fn
       eps_clip: 0.2
       kl_coef: 0
       use_kl_loss: false
@@ -60,8 +139,8 @@ policies:
       update_weights: true
       num_gpus_per_engine: 1
 
-      mem_fraction_static: 0.85
-      # cuda_graph_bs: [1, 2, 4, 8, 16, 32]
+      mem_fraction_static: 0.8
+      # cuda_graph_bs: [1, 2, 4, 8, 16, 32, 64]
       chunked_prefill_size: 4096
       max_running_requests: 512
       # max_total_tokens: 131072
@@ -69,72 +148,4 @@ policies:
 
       server_groups:
         - worker_type: regular
-          num_gpus: 1
-
-  - name: subagent
-    role: actor
-
-    hf_checkpoint: /root/Qwen3-0.6B
-    save: /ckpt/multi_policy_orchestrator_subagent/qwen3-0.6b/subagent
-
-    buffer_mode: split
-
-    num_gpus_per_node: 1
-    megatron_num_nodes: 1
-    sglang_num_nodes: 1
-
-    megatron:
-      megatron_to_hf_mode: bridge
-      tensor_model_parallel_size: 1
-      pipeline_model_parallel_size: 1
-      context_parallel_size: 1
-      expert_model_parallel_size: 1
-      expert_tensor_parallel_size: 1
-
-      recompute_granularity: full
-      recompute_method: uniform
-      recompute_num_layers: 1
-
-      attention_dropout: 0.0
-      hidden_dropout: 0.0
-      accumulate_allreduce_grads_in_fp32: true
-      attention_softmax_in_fp32: true
-
-      log_probs_chunk_size: 512
-
-      micro_batch_size: 1
-      global_batch_size: 96
-      use_dynamic_batch_size: true
-      max_tokens_per_gpu: 32768
-
-      optimizer: adam
-      lr: 1.0e-6
-      lr_decay_style: constant
-      weight_decay: 0.1
-      adam_beta1: 0.9
-      adam_beta2: 0.98
-      optimizer_cpu_offload: true
-      overlap_cpu_optimizer_d2h_h2d: true
-      use_precision_aware_optimizer: true
-
-      advantage_estimator: grpo
-      n_samples_per_prompt: 12
-      eps_clip: 0.2
-      kl_coef: 0
-      use_kl_loss: false
-      kl_loss_coef: 0
-
-    sglang:
-      update_weights: true
-      num_gpus_per_engine: 1
-
-      mem_fraction_static: 0.85
-      # cuda_graph_bs: [1, 2, 4, 8, 16, 32]
-      chunked_prefill_size: 4096
-      max_running_requests: 512
-      # max_total_tokens: 131072
-      log_level: info
-
-      server_groups:
-        - worker_type: regular
-          num_gpus: 1
+          num_gpus: 4        # = sglang_num_nodes(1) × num_gpus_per_node(4); 4 DP engines

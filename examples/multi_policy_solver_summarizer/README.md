@@ -10,9 +10,9 @@ Two trainable paired policies cooperate on math problems (DAPO-math-17k). The **
 
 ## Files
 
-* `config.yaml`: solver + summarizer policy schema (both trainable, paired with their own SGLang engines).
+* `config-nocolocate.yaml` / `config-colocate.yaml`: solver + summarizer policy schema (both trainable, paired with their own SGLang engines). The no-colocate config spreads rollout across 8 GPUs (3 sglang engines per policy); the colocate config fits 2 GPUs.
 * `eval_config.yaml`: AIME-2024 eval-dataset config (rm_type, n_samples). Consumed via `--eval-config`.
-* `run-qwen3-0.6B-solver-summarizer.sh`: launch script (ray start + train_multi_policy.py).
+* `run-qwen3-0.6B-solver-summarizer-nocolocate.sh` / `-colocate.sh`: launch scripts (ray start + train_multi_policy.py).
 * `agent_system.py`: per-prompt rollout orchestration (solver → summarizer dispatch).
 * `rollout_with_multi_agents.py`: top-level multi-agent rollout entrypoint.
 * `eval_fn.py`: custom eval function — aggregates chain samples into summarizer / solver-mean / solver-max metrics.
@@ -22,7 +22,7 @@ Two trainable paired policies cooperate on math problems (DAPO-math-17k). The **
 
 ```bash
 cd slime-n
-bash examples/multi_policy_solver_summarizer/run-qwen3-0.6B-solver-summarizer.sh
+bash examples/multi_policy_solver_summarizer/run-qwen3-0.6B-solver-summarizer-nocolocate.sh
 ```
 
 ## How It Works
