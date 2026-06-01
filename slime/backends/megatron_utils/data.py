@@ -362,43 +362,27 @@ def log_rollout_data(
 
         reduced_log_dict = gather_log_data(metric_name, args, rollout_id, log_dict)
         if args.ci_test and reduced_log_dict is not None:
+            # Per-policy metric keys (metric_name == "rollout" or "rollout/<policy>").
             metric_prefix = f"{metric_name}/"
-            if (
-                rollout_id == 0
-                and f"{metric_prefix}log_probs" in reduced_log_dict
-                and f"{metric_prefix}ref_log_probs" in reduced_log_dict
-            ):
-                # TODO: figure out why there is a small numerical difference in log_probs and ref_log_probs in CI test, and whether it's expected or not.
-                # assert reduced_log_dict["rollout/log_probs"] == reduced_log_dict["rollout/ref_log_probs"]
-                assert (
-                    abs(
-                        reduced_log_dict[f"{metric_prefix}log_probs"]
-                        - reduced_log_dict[f"{metric_prefix}ref_log_probs"]
-                    )
-                    < 1e-8
-                )
-            if f"{metric_prefix}log_probs" in reduced_log_dict:
-                assert -0.5 < reduced_log_dict[f"{metric_prefix}log_probs"] < 0
-            if f"{metric_prefix}entropy" in reduced_log_dict:
-                assert 0 < reduced_log_dict[f"{metric_prefix}entropy"] < 0.5
-            # This is an initial actor/ref zero-KL check. R3 replays rollout
-            # routing for the actor forward, while the reference forward
-            # intentionally falls through to normal routing, so their
-            # log-probs are not expected to match bit-for-bit in CI.
+            # Initial actor/ref zero-KL check. R3 replays rollout routing for the
+            # actor forward while the reference forward uses normal routing, so
+            # their log-probs are not expected to match bit-for-bit in CI.
             if (
                 rollout_id == 0
                 and not getattr(args, "ci_disable_kl_checker", False)
                 and not getattr(args, "use_rollout_routing_replay", False)
-                and "rollout/log_probs" in reduced_log_dict
-                and "rollout/ref_log_probs" in reduced_log_dict
+                and f"{metric_prefix}log_probs" in reduced_log_dict
+                and f"{metric_prefix}ref_log_probs" in reduced_log_dict
             ):
                 # TODO: figure out why there is a small numerical difference in log_probs and ref_log_probs in CI test, and whether it's expected or not.
-                # assert reduced_log_dict["rollout/log_probs"] == reduced_log_dict["rollout/ref_log_probs"]
-                assert abs(reduced_log_dict["rollout/log_probs"] - reduced_log_dict["rollout/ref_log_probs"]) < 1e-8
-            if "rollout/log_probs" in reduced_log_dict:
-                assert -1 < reduced_log_dict["rollout/log_probs"] < 0
-            if "rollout/entropy" in reduced_log_dict:
-                assert 0 < reduced_log_dict["rollout/entropy"] < 1
+                assert (
+                    abs(reduced_log_dict[f"{metric_prefix}log_probs"] - reduced_log_dict[f"{metric_prefix}ref_log_probs"])
+                    < 1e-8
+                )
+            if f"{metric_prefix}log_probs" in reduced_log_dict:
+                assert -1 < reduced_log_dict[f"{metric_prefix}log_probs"] < 0
+            if f"{metric_prefix}entropy" in reduced_log_dict:
+                assert 0 < reduced_log_dict[f"{metric_prefix}entropy"] < 1
 
     if args.log_multi_turn:
         log_multi_turn_data(rollout_id, args, rollout_data)

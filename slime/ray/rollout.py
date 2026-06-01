@@ -681,7 +681,9 @@ class RolloutManager:
             policy_args = self._policy_args.get(name, self.args)
             tp_cfg = self._policy_train_parallel_config.get(name, self.train_parallel_config)
             train_data = self._convert_samples_to_train_data(bucket, policy_args=policy_args)
-            out[name] = self._split_train_data_by_dp(train_data, tp_cfg["dp_size"])
+            out[name] = self._split_train_data_by_dp(
+                train_data, tp_cfg["dp_size"], policy_args=policy_args, train_parallel_config=tp_cfg
+            )
         return out
 
     def eval(self, rollout_id):
@@ -1011,7 +1013,7 @@ class RolloutManager:
         if policy_name is not None:
             self._policy_train_parallel_config[policy_name] = config
 
-    def _split_train_data_by_dp(self, data):
+    def _split_train_data_by_dp(self, data, dp_size=None, policy_args=None, train_parallel_config=None):
         """Compute the DP/mbs schedule and package each rank's rollout_data
         into a Ray Box. The schedule itself is computed by
         :func:`build_dp_schedule` so it stays unit-testable without Ray/sglang.
@@ -1021,16 +1023,22 @@ class RolloutManager:
         groups so the training step count is fixed at
         ``rollout_batch_size * n_samples_per_prompt // global_batch_size``
         regardless of how many training samples each group produced.
+
+        Multi-policy: pass the target policy's ``dp_size``, ``policy_args`` and
+        ``train_parallel_config`` so the schedule uses that policy's
+        ``global_batch_size`` / parallelism instead of the run-level defaults.
         """
-        dp_size = self.train_parallel_config["dp_size"]
+        pargs = policy_args if policy_args is not None else self.args
+        tpc = train_parallel_config if train_parallel_config is not None else self.train_parallel_config
+        dp_size = dp_size if dp_size is not None else tpc["dp_size"]
         total_lengths = [len(t) for t in data["tokens"]]
         data["total_lengths"] = total_lengths
 
         partitions, micro_batch_indices, num_microbatches, global_batch_sizes = build_dp_schedule(
-            self.args,
-            self.train_parallel_config,
+            pargs,
+            tpc,
             total_lengths,
-            global_batch_size=self.args.global_batch_size,
+            global_batch_size=pargs.global_batch_size,
             group_indices=data["group_ids"],
         )
 

@@ -362,7 +362,7 @@ class SGLangEngine(RayActor):
         """
         return self._make_request("update_weight_version", {"new_version": str(new_version)})
 
-    def release_memory_occupation(self):
+    def release_memory_occupation(self, tags: list[str] | None = None):
         self.flush_cache()
         payload = {"tags": tags} if tags is not None else None
         return self._make_request("release_memory_occupation", payload)

@@ -161,18 +161,7 @@ cd $BASE_DIR/Megatron-LM && git checkout ${MEGATRON_COMMIT} && pip install -e . 
 # if slime does not exist locally, clone it
 if [ ! -d "$BASE_DIR/slime" ]; then
   cd $BASE_DIR
-<<<<<<< HEAD
-  git clone  https://github.com/THUDM/slime.git
-  cd slime/
-  export SLIME_DIR=$BASE_DIR/slime
-  pip install -e .
-else
-  export SLIME_DIR=$BASE_DIR/slime
-  cd $SLIME_DIR
-  pip install -e .
-=======
   git clone https://github.com/THUDM/slime.git
->>>>>>> reauthored-upstream-2026-05-093a75
 fi
 export SLIME_DIR=$BASE_DIR/slime
 cd $SLIME_DIR
@@ -209,9 +198,6 @@ else
   echo "sglang patch already applied or not applicable, skipping"
 fi
 cd $BASE_DIR/Megatron-LM
-<<<<<<< HEAD
-git apply $SLIME_DIR/docker/patch/v0.5.9/megatron.patch
-=======
 if git apply --check $SLIME_DIR/docker/patch/${PATCH_VERSION}/megatron.patch 2>/dev/null; then
   git update-index --refresh || true
   git apply $SLIME_DIR/docker/patch/${PATCH_VERSION}/megatron.patch --3way
@@ -222,4 +208,3 @@ if git apply --check $SLIME_DIR/docker/patch/${PATCH_VERSION}/megatron.patch 2>/
 else
   echo "megatron patch already applied or not applicable, skipping"
 fi
->>>>>>> reauthored-upstream-2026-05-093a75
