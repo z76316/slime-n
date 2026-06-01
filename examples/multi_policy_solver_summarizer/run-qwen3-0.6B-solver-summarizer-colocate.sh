@@ -62,7 +62,7 @@ ROLLOUT_ARGS=(
    --rollout-batch-size 128
    --disable-rollout-trim-samples
    --rollout-max-context-len 32768
-   --rollout-max-response-len 16384
+   --rollout-max-response-len 32768
    --rollout-temperature 1
    --balance-data
 )
@@ -90,7 +90,7 @@ EVAL_ARGS=(
    --eval-interval 2
    --eval-config "${SCRIPT_DIR}/eval_config.yaml"
    --eval-function-path examples.multi_policy_solver_summarizer.eval_fn.eval_with_multi_agents
-   --eval-max-response-len 16384
+   --eval-max-response-len 32768
    --eval-top-p 1
 )
 
