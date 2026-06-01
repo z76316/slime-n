@@ -81,9 +81,9 @@ policies:
       # model_path defaults to top-level hf_checkpoint
 
       mem_fraction_static: 0.2
-      cuda_graph_bs: [1, 2, 4, 8, 16, 32]
+      # cuda_graph_bs: [1, 2, 4, 8, 16, 32]
       chunked_prefill_size: 8192
-      max_running_requests: 32
+      max_running_requests: 512
       log_level: info
       # Optional (uncomment to enable):
       # max_total_tokens: 1048576
@@ -159,9 +159,9 @@ policies:
       num_gpus_per_engine: 1
 
       mem_fraction_static: 0.2
-      cuda_graph_bs: [1, 2, 4, 8, 16, 32]
+      # cuda_graph_bs: [1, 2, 4, 8, 16, 32]
       chunked_prefill_size: 8192
-      max_running_requests: 32
+      max_running_requests: 512
       log_level: info
 
       server_groups:
@@ -230,9 +230,9 @@ policies:
       num_gpus_per_engine: 1
 
       mem_fraction_static: 0.2
-      cuda_graph_bs: [1, 2, 4, 8, 16, 32]
+      # cuda_graph_bs: [1, 2, 4, 8, 16, 32]
       chunked_prefill_size: 8192
-      max_running_requests: 32
+      max_running_requests: 512
       log_level: info
 
       server_groups:

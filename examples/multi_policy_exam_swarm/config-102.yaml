@@ -70,9 +70,9 @@ _sglang_defaults: &sglang_defaults
   update_weights: true
   num_gpus_per_engine: 1
   mem_fraction_static: 0.3
-  cuda_graph_bs: [1, 2, 4, 8, 16, 32]
+  # cuda_graph_bs: [1, 2, 4, 8, 16, 32]
   chunked_prefill_size: 4096
-  max_running_requests: 32
+  max_running_requests: 512
   log_level: info
   server_groups:
     - worker_type: regular
