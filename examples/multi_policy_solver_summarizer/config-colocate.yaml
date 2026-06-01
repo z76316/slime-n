@@ -1,6 +1,6 @@
 # Solver + summarizer on DAPO-math-17k. Two trainable paired policies.
-# Cluster: 2 GPUs with --colocate (max(2 Megatron, 2 sglang); each policy's
-# actor and engine timeshare one GPU). Used by the -colocate launch script.
+# Cluster: 8 GPUs with --colocate (max(8 Megatron, 8 sglang); each policy gets
+# a 4-GPU slice where its actor and engines timeshare). Used by -colocate launch.
 # See README for the pipeline / reward shape.
 
 policies:
@@ -15,7 +15,7 @@ policies:
 
     buffer_mode: split
 
-    num_gpus_per_node: 1
+    num_gpus_per_node: 4        # 8xH200: 4 GPUs/policy (DP-4 train + 4 sglang engines, timeshared)
     megatron_num_nodes: 1
     sglang_num_nodes: 1
 
@@ -42,7 +42,7 @@ policies:
       micro_batch_size: 1
       global_batch_size: 128
       use_dynamic_batch_size: true
-      max_tokens_per_gpu: 8192
+      max_tokens_per_gpu: 32768
 
       optimizer: adam
       lr: 1.0e-6
@@ -66,18 +66,20 @@ policies:
       update_weights: true
       num_gpus_per_engine: 1
 
-      # No colocate: engines have their own GPUs. Use a higher mem_fraction
-      # since we don't need to leave room for a colocated trainer.
-      mem_fraction_static: 0.85
-      cuda_graph_bs: [1, 2, 4, 8, 16, 32]
+      # Colocate: sglang and the trainer timeshare each policy's 4 GPUs
+      # (torch_memory_saver pauses sglang during the train step; the trainer
+      # is offloaded during rollout). They don't peak together, so 0.8 is
+      # safe on H200 (141GB) — the 0.6B Megatron weights fit the remainder.
+      mem_fraction_static: 0.8
+      # cuda_graph_bs: [1, 2, 4, 8, 16, 32, 64]
       chunked_prefill_size: 4096
-      max_running_requests: 32
+      max_running_requests: 512
       max_total_tokens: 131072
       log_level: info
 
       server_groups:
         - worker_type: regular
-          num_gpus: 1
+          num_gpus: 4        # = sglang_num_nodes(1) × num_gpus_per_node(4); 4 DP engines
 
   # ─── summarizer ───────────────────────────────────────────────────────────
   - name: summarizer
@@ -88,7 +90,7 @@ policies:
 
     buffer_mode: split
 
-    num_gpus_per_node: 1
+    num_gpus_per_node: 4        # 8xH200: 4 GPUs/policy (DP-4 train + 4 sglang engines, timeshared)
     megatron_num_nodes: 1
     sglang_num_nodes: 1
 
@@ -114,7 +116,7 @@ policies:
       micro_batch_size: 1
       global_batch_size: 128
       use_dynamic_batch_size: true
-      max_tokens_per_gpu: 8192
+      max_tokens_per_gpu: 32768
 
       optimizer: adam
       lr: 1.0e-6
@@ -137,13 +139,13 @@ policies:
       update_weights: true
       num_gpus_per_engine: 1
 
-      mem_fraction_static: 0.85
-      cuda_graph_bs: [1, 2, 4, 8, 16, 32]
+      mem_fraction_static: 0.8
+      # cuda_graph_bs: [1, 2, 4, 8, 16, 32, 64]
       chunked_prefill_size: 4096
-      max_running_requests: 32
+      max_running_requests: 512
       max_total_tokens: 131072
       log_level: info
 
       server_groups:
         - worker_type: regular
-          num_gpus: 1
+          num_gpus: 4        # = sglang_num_nodes(1) × num_gpus_per_node(4); 4 DP engines
