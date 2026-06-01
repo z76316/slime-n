@@ -90,7 +90,7 @@ ROLLOUT_ARGS=(
    --rollout-batch-size 8                  # 8 prompts × K=8 = 64 per-agent samples = global_batch_size
    --disable-rollout-trim-samples
    --rollout-max-context-len 32768
-   --rollout-max-response-len 16384
+   --rollout-max-response-len 32768
    --rollout-temperature 1.0
    --rollout-top-p 0.95
    --balance-data
@@ -108,7 +108,7 @@ TRAIN_ARGS=(
 
 EVAL_ARGS=(
    --n-samples-per-eval-prompt 8
-   --eval-max-response-len 16384
+   --eval-max-response-len 32768
    --eval-top-p 1
 )
 

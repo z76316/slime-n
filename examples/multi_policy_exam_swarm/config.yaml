@@ -35,7 +35,7 @@ _megatron_defaults: &megatron_defaults
   micro_batch_size: 1
   global_batch_size: 64
   use_dynamic_batch_size: true
-  max_tokens_per_gpu: 18432         # ~18k, room for 16k response + ~2k prompt in one microbatch
+  max_tokens_per_gpu: 32768         # fits a full 32768-token sequence in one microbatch
 
   optimizer: adam
   lr: 1.0e-6

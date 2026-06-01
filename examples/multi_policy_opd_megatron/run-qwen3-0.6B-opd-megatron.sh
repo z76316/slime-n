@@ -52,7 +52,7 @@ ROLLOUT_ARGS=(
    --num-rollout 300
    --rollout-batch-size 16
    --rollout-max-context-len 32768
-   --rollout-max-response-len 16384
+   --rollout-max-response-len 32768
    --rollout-temperature 1
    --balance-data
 )
@@ -82,7 +82,7 @@ EVAL_ARGS=(
    # --eval-interval 20
    # --eval-prompt-data aime ${DATA_DIR}/aime-2024/aime-2024.jsonl
    # --n-samples-per-eval-prompt 16
-   # --eval-max-response-len 16384
+   # --eval-max-response-len 32768
    # --eval-top-p 1
 )
 

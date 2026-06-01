@@ -87,7 +87,7 @@ policies:
       micro_batch_size: 1
       global_batch_size: 192       # 384 / 192 = 2 train steps per rollout
       use_dynamic_batch_size: true
-      max_tokens_per_gpu: 8192
+      max_tokens_per_gpu: 32768
 
       optimizer: adam
       lr: 1.0e-6
@@ -159,7 +159,7 @@ policies:
       micro_batch_size: 1
       global_batch_size: 384       # 768 / 384 = 2 train steps per rollout
       use_dynamic_batch_size: true
-      max_tokens_per_gpu: 8192
+      max_tokens_per_gpu: 32768
 
       optimizer: adam
       lr: 1.0e-6
