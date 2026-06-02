@@ -1,0 +1,163 @@
+# OPD multi-policy config — 30B-A3B cross-checkpoint, dual teacher (Megatron + SGLang, same teacher weights).
+#   student          = Qwen3-30B-A3B-Instruct-2507 (trainable, paired Megatron + SGLang)
+#   teacher_megatron = Qwen3-30B-A3B-Thinking-2507 (frozen Megatron forward-only, drives OPD)
+#   teacher_sglang   = Qwen3-30B-A3B-Thinking-2507 (frozen SGLang, scores same rollouts; offline diff diagnostic)
+#
+# Cluster: 4 nodes × 8 H200 = 32 GPU total (NO colocate). Fits because the
+# trainable student megatron is shrunk to EP8 DP1 (8 GPU / world 8) instead of
+# the 8-node EP8 DP2 (16 GPU) used by the standalone 30Bcrossckpt experiments:
+#   student megatron  : 1 node (8 GPU)   TP1 PP1 CP1 EP8 ETP1 DP1  → world 8
+#   student SGLang    : 1 node (8 GPU)   1 engine × TP8
+#   teacher_megatron  : 1 node (8 GPU)   TP1 PP1 CP1 EP8 ETP1 DP1  → world 8 (matches student)
+#   teacher_sglang    : 1 node (8 GPU)   1 engine × TP8 (frozen, m✗ s✓)
+#   total             : actor(8+8) + rollout(8+8) = 32 GPU
+#
+# Framework constraint (train_multi_policy.py:354): the frozen producer's
+# last-PP-stage DP must equal the consumer's world_size. PP=1 here, so
+# teacher_megatron's 8 ranks all emit → 8 == student world 8. ✓
+#
+# Why DP1 (not the proven DP2): DP2 needs 16 GPU/megatron-actor → 2 megatron
+# actors = 32 GPU for actors alone, +16 for sglang = 48, over the 32 budget.
+# DP1 keeps each megatron actor at 8 GPU. Trade-off: optimizer state is NOT
+# sharded across DP (~57 GB/rank for the trainable student vs ~28.5 GB at DP2),
+# but with use_precision_aware_optimizer it fits H200 141 GB (~88 GB/rank peak,
+# ~53 GB headroom). If the train forward OOMs, flip student
+# optimizer_cpu_offload → true (drops GPU optimizer residency to ~2-3 GB at a
+# 15-25% throughput cost).
+
+policies:
+
+  # ─── student — Qwen3-30B-A3B-Instruct-2507, trainable, paired pipeline ───
+  - name: student
+    role: actor
+    trainable: true
+
+    hf_checkpoint: /root/Qwen3-30B-A3B-Instruct-2507
+    load: /ckpt/multi_policy_opd_dualteacher_30Bcrossckpt/qwen3-30b-a3b-instruct-2507/student
+    ref_load: /ckpt/Qwen3-30B-A3B-Instruct_torch_dist
+    save: /ckpt/multi_policy_opd_dualteacher_30Bcrossckpt/qwen3-30b-a3b-instruct-2507/student
+
+    buffer_mode: split
+    num_gpus_per_node: 8
+    megatron_num_nodes: 1    # 8 GPU → EP8 DP1, world 8
+    sglang_num_nodes: 1      # 8 GPU → 1 engine × TP8
+
+    megatron:
+      tensor_model_parallel_size: 1
+      pipeline_model_parallel_size: 1
+      context_parallel_size: 1
+      expert_model_parallel_size: 8
+      expert_tensor_parallel_size: 1
+
+      recompute_granularity: full
+      recompute_method: uniform
+      recompute_num_layers: 1
+
+      attention_dropout: 0.0
+      hidden_dropout: 0.0
+      accumulate_allreduce_grads_in_fp32: true
+      attention_softmax_in_fp32: true
+
+      log_probs_chunk_size: 512
+
+      micro_batch_size: 1
+      global_batch_size: 256
+      use_dynamic_batch_size: true
+      max_tokens_per_gpu: 4096
+
+      optimizer: adam
+      lr: 1.0e-6
+      lr_decay_style: constant
+      weight_decay: 0.1
+      adam_beta1: 0.9
+      adam_beta2: 0.98
+      optimizer_cpu_offload: false   # DP1 fits H200 without offload (~88 GB/rank); flip to true if OOM
+      overlap_cpu_optimizer_d2h_h2d: false
+      use_precision_aware_optimizer: true
+
+      advantage_estimator: grpo
+      n_samples_per_prompt: 8
+      eps_clip: 0.2
+      eps_clip_high: 0.28
+      kl_coef: 0
+      use_kl_loss: false
+      kl_loss_coef: 0
+
+      use_opd: true
+      opd_type: megatron_actor
+      opd_kl_coef: 1.0
+
+    sglang:
+      update_weights: true
+      num_gpus_per_engine: 8         # whole-node TP=8; 1 engine on 1 node
+
+      mem_fraction_static: 0.85
+      cuda_graph_bs: [1, 2, 4, 8, 16, 32]
+      chunked_prefill_size: 8192
+      max_running_requests: 64
+      max_total_tokens: 262144
+      log_level: info
+
+      server_groups:
+        - worker_type: regular
+          num_gpus: 8                # = sglang_num_nodes × num_gpus_per_node
+
+  # ─── teacher_megatron — Qwen3-30B-A3B-Thinking, frozen Megatron, world matches student ──
+  - name: teacher_megatron
+    role: actor
+    trainable: false
+
+    hf_checkpoint: /root/Qwen3-30B-A3B-Thinking-2507
+    load: /ckpt/Qwen3-30B-A3B-Thinking-2507_torch_dist
+
+    buffer_mode: split
+    num_gpus_per_node: 8
+    megatron_num_nodes: 1    # 8 GPU → EP8 DP1, world 8 (matches student)
+    sglang_num_nodes: 0
+
+    megatron:
+      tensor_model_parallel_size: 1
+      pipeline_model_parallel_size: 1
+      context_parallel_size: 1
+      expert_model_parallel_size: 8
+      expert_tensor_parallel_size: 1
+
+      # forward-only — leave recompute_* unset
+      attention_dropout: 0.0
+      hidden_dropout: 0.0
+      accumulate_allreduce_grads_in_fp32: false   # frozen; bf16 grad buffer never written
+      attention_softmax_in_fp32: true
+
+      log_probs_chunk_size: 512
+
+      micro_batch_size: 1
+      global_batch_size: 256
+      use_dynamic_batch_size: true
+      max_tokens_per_gpu: 8192       # forward-only has more headroom than the student
+
+  # ─── teacher_sglang — Qwen3-30B-A3B-Thinking, frozen SGLang (diagnostic logp) ──
+  - name: teacher_sglang
+    role: actor
+    trainable: false
+
+    hf_checkpoint: /root/Qwen3-30B-A3B-Thinking-2507
+
+    buffer_mode: split
+    num_gpus_per_node: 8
+    megatron_num_nodes: 0
+    sglang_num_nodes: 1      # 8 GPU → 1 engine × TP8
+
+    sglang:
+      update_weights: false  # frozen — never push weight updates
+      num_gpus_per_engine: 8
+
+      mem_fraction_static: 0.85
+      cuda_graph_bs: [1, 2, 4, 8, 16, 32]
+      chunked_prefill_size: 8192
+      max_running_requests: 64
+      max_total_tokens: 262144
+      log_level: info
+
+      server_groups:
+        - worker_type: regular
+          num_gpus: 8
