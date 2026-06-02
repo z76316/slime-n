@@ -1,0 +1,33 @@
+# Eval config for the OPD dualteacher 30Bcrossckpt run.
+#
+# Single trainable student (Qwen3-30B-A3B-Instruct), so this does NOT use the
+# solver_summarizer multi-agent eval_fn (that aggregates N solver+summarizer
+# trajectories per prompt). Instead it reuses the single-student eval path:
+# eval_student.generate_eval_student routes each eval prompt to the
+# "student" policy's SGLang engine via get_model_url(args, "student").
+#
+# NO `policies:` field — the legacy resolver hands the dataset to the first
+# trainable-paired policy (student); a `policies:` field would trip the
+# not-yet-wired per-policy-eval guard in train_multi_policy.
+#
+# The per-dataset custom_generate_function_path OVERRIDES the run-level
+# --custom-generate-function-path (generate_with_teacher_sglang) at eval time,
+# so eval does NOT POST to the teacher_sglang engine — clean student-only pass@k.
+#
+# rm_type=deepscaler matches the train --rm-type. NOTE: deepscaler gates on a
+# </think> (or ###Response) marker (rm_hub/deepscaler.py); a non-thinking
+# Instruct student scores 0 until OPD distillation teaches it to emit </think>.
+# This is intentional and consistent with the train reward signal.
+eval:
+  defaults:
+    n_samples_per_eval_prompt: 8
+    temperature: 1.0
+    top_p: 1.0
+    max_response_len: 16384
+  datasets:
+    - name: aime-2024
+      path: /root/aime-2024/aime-2024.jsonl
+      rm_type: deepscaler
+      input_key: prompt
+      label_key: label
+      custom_generate_function_path: examples.multi_policy_opd_megatron.eval_student.generate_eval_student
