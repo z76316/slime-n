@@ -28,6 +28,10 @@ Place a Qwen3-0.6B HF checkpoint at `/root/Qwen3-0.6B`, a different fine-tune at
 * Per-role rollout / train / packed-data dumps land at `/tmp/multi_policy_opd_megatron/dump_details/<policy_name>/...`.
 
 
+## Variant: dual-teacher (30B-A3B)
+
+The `30Bcrossckpt_dualteacher_*` files add a Qwen3-30B-A3B experiment that hosts the **same teacher weights on a Megatron and an SGLang engine at once** — `teacher_megatron` drives the OPD KL, `teacher_sglang` just scores the same rollout tokens — so the per-token logp mismatch between the training and inference engines (`teacher_sglang_log_probs − teacher_log_probs`) is directly measurable. Launch with `30Bcrossckpt_dualteacher_run-opd.sh` (32 GPU, 4×8, no colocate).
+
 ## Compared to legacy single-policy OPD
 
 `examples/on_policy_distillation/` loads the teacher as an in-process tag inside a single Megatron actor (`_switch_model("teacher")`). That requires teacher and student to share the same LLM architecture — you cannot distill from, say, a Qwen3-32B teacher into a Qwen3-8B student.
